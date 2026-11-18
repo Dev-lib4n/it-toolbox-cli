@@ -1,0 +1,122 @@
+name: Release Standalone Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version (e.g. 1.0.0)'
+        required: false
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build PHAR & Native Binaries (Linux/Windows x64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, posix, phar, fileinfo, curl, openssl, ctype, tokenizer, dom, xml
+          ini-values: phar.readonly=Off
+          coverage: none
+          tools: composer:v2
+
+      - name: Install Production Dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
+
+      - name: Compile Portable PHAR (builds/it-toolbox)
+        env:
+          BUILD_VERSION: ${{ github.event.inputs.version || github.ref_name || '1.0.0' }}
+        run: |
+          mkdir -p builds
+          php -d phar.readonly=0 it-toolbox app:build it-toolbox --build-version="${BUILD_VERSION#v}" --no-interaction
+          chmod +x builds/it-toolbox
+          ls -lh builds/it-toolbox
+
+      - name: Download Pre-compiled static-php-cli (micro.sfx) for Linux & Windows x86_64
+        run: |
+          set -euo pipefail
+          mkdir -p .spc-cache
+
+          echo "Resolving latest PHP 8.3 micro.sfx for Linux x86_64..."
+          LINUX_INDEX=$(curl -fsSL "https://dl.static-php.dev/static-php-cli/common/?format=json" || echo "[]")
+          LINUX_FILE=$(echo "$LINUX_INDEX" | jq -r '.[].name | select(test("^php-8\\.3\\.[0-9]+-micro-linux-x86_64\\.tar\\.gz$"))' | sort -V | tail -n 1)
+          if [ -z "$LINUX_FILE" ] || [ "$LINUX_FILE" = "null" ]; then
+            LINUX_URL="https://dl.static-php.dev/static-php-cli/common/php-8.3.14-micro-linux-x86_64.tar.gz"
+          else
+            LINUX_URL="https://dl.static-php.dev/static-php-cli/common/${LINUX_FILE}"
+          fi
+          echo "Downloading Linux micro.sfx from: ${LINUX_URL}"
+          curl -fL --retry 3 -o .spc-cache/micro-linux.tar.gz "${LINUX_URL}"
+          tar -xzf .spc-cache/micro-linux.tar.gz -C .spc-cache
+          mv .spc-cache/micro.sfx ./micro-linux.sfx
+
+          echo "Resolving latest PHP 8.3 micro.sfx for Windows x86_64..."
+          WIN_INDEX=$(curl -fsSL "https://dl.static-php.dev/static-php-cli/windows/spc-max/?format=json" || echo "[]")
+          WIN_FILE=$(echo "$WIN_INDEX" | jq -r '.[].name | select(test("^php-8\\.3\\.[0-9]+-micro-win\\.zip$"))' | sort -V | tail -n 1)
+          if [ -z "$WIN_FILE" ] || [ "$WIN_FILE" = "null" ]; then
+            WIN_URL="https://dl.static-php.dev/static-php-cli/windows/spc-max/php-8.3.13-micro-win.zip"
+          else
+            WIN_URL="https://dl.static-php.dev/static-php-cli/windows/spc-max/${WIN_FILE}"
+          fi
+          echo "Downloading Windows micro.sfx from: ${WIN_URL}"
+          curl -fL --retry 3 -o .spc-cache/micro-win.zip "${WIN_URL}"
+          unzip -q -o .spc-cache/micro-win.zip -d .spc-cache
+          mv .spc-cache/micro.sfx ./micro-windows.sfx
+
+          rm -rf .spc-cache
+          ls -lh micro-linux.sfx micro-windows.sfx
+
+      - name: Package Standalone Native Binaries (Zero-Dependency)
+        run: |
+          set -euo pipefail
+
+          # Strip leading Unix shebang (#!/usr/bin/env php) if present before concatenating with micro.sfx
+          if head -c 2 builds/it-toolbox | grep -q '#!'; then
+            tail -n +2 builds/it-toolbox > builds/it-toolbox.clean.phar
+          else
+            cp builds/it-toolbox builds/it-toolbox.clean.phar
+          fi
+
+          cat micro-linux.sfx builds/it-toolbox.clean.phar > builds/it-toolbox-linux-x64
+          chmod +x builds/it-toolbox-linux-x64
+
+          cat micro-windows.sfx builds/it-toolbox.clean.phar > builds/it-toolbox-windows-x64.exe
+
+          rm -f builds/it-toolbox.clean.phar micro-linux.sfx micro-windows.sfx
+          ls -lh builds/
+
+      - name: Smoke Test Linux Standalone Binary
+        run: |
+          ./builds/it-toolbox-linux-x64 --version
+          ./builds/it-toolbox-linux-x64 list
+
+      - name: Upload Build Artifacts (Workflow Run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: it-toolbox-binaries
+          path: |
+            builds/it-toolbox-linux-x64
+            builds/it-toolbox-windows-x64.exe
+            builds/it-toolbox
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            builds/it-toolbox-linux-x64
+            builds/it-toolbox-windows-x64.exe
+            builds/it-toolbox

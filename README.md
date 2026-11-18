@@ -68,33 +68,44 @@ flowchart TD
 
 ## Installation & Usage
 
-### Prerequisites
-- **PHP 8.3** or higher (`cli`, `mbstring`, `pcntl` optional on Linux)
-- **Composer 2.x**
-- Administrator privileges (Windows) or `sudo` (Linux) recommended for privileged operations (spooler restart, system temp cleanup, DHCP renewal).
-
-### Installation
-
 Choose the installation method that best fits your scenario:
 
-#### Option A: Standalone Binary (Recommended for End Users — No Composer Required)
+#### Option 1: Native Standalone Binary (Zero Dependencies — No PHP or Composer Required)
 
-You can download the pre-compiled, portable `it-toolbox` executable directly from the [GitHub Releases](https://github.com/Dev-lib4n/it-toolbox-cli/releases) page without cloning the repository or installing Composer:
+Ideal for field IT technicians and target workstations. Download the self-contained native executable (powered by `static-php-cli` `micro.sfx`) directly from the [GitHub Releases](https://github.com/Dev-lib4n/it-toolbox-cli/releases) page and run it immediately without installing PHP or Composer:
 
+**Windows (x64):**
+```powershell
+# Download 'it-toolbox-windows-x64.exe' from GitHub Releases and run:
+.\it-toolbox-windows-x64.exe
+
+# Or launch directly in your preferred language:
+.\it-toolbox-windows-x64.exe --lang=en
+.\it-toolbox-windows-x64.exe --lang=pt_BR
+```
+
+**Linux (x64):**
 ```bash
-# 1. Download the latest 'it-toolbox' binary from GitHub Releases
-# 2. Run directly with PHP 8.3+
-php it-toolbox
+# Download 'it-toolbox-linux-x64' from GitHub Releases, grant execution permission, and run:
+chmod +x it-toolbox-linux-x64
+./it-toolbox-linux-x64
 
-# (Optional on Linux) Make it executable and move to your PATH:
-chmod +x it-toolbox
-sudo mv it-toolbox /usr/local/bin/it-toolbox
+# (Optional) Install globally in PATH:
+sudo mv it-toolbox-linux-x64 /usr/local/bin/it-toolbox
 it-toolbox
 ```
 
-#### Option B: From Source (Development & Contributors)
+#### Option 2: Portable PHAR (Requires PHP 8.3+)
 
-If you want to contribute, customize the code, or run the automated test suite:
+If your machine already has **PHP 8.3+** installed, download the cross-platform `it-toolbox` PHAR archive from [GitHub Releases](https://github.com/Dev-lib4n/it-toolbox-cli/releases):
+
+```bash
+php it-toolbox
+```
+
+#### Option 3: From Source (Requires PHP 8.3+ & Composer 2.x)
+
+For developers who want to customize the source code or run the automated test suite:
 
 ```bash
 # 1. Clone the repository
@@ -104,6 +115,8 @@ cd it-toolbox-cli
 # 2. Install dependencies via Composer
 composer install
 ```
+
+> **Note:** Administrator privileges (Windows) or `sudo` (Linux) are recommended for privileged system operations (spooler restart, system temp cleanup, and DHCP renewal).
 
 ### Interactive TUI Mode
 
@@ -141,12 +154,16 @@ Every module can also be executed directly in headless/CLI scripts or terminal s
 
 ## Build & Tests
 
-### Compiling Standalone PHAR Binary
+### Compiling Standalone PHAR & Native Binaries
 
-Compile the application into a single distributable `.phar` executable (`builds/it-toolbox`):
+Compile the application into a portable `.phar` (`builds/it-toolbox`) or bundle it with `static-php-cli` (`micro.sfx`) into zero-dependency native executables (`builds/it-toolbox-linux-x64` and `builds/it-toolbox-windows-x64.exe`):
 
 ```bash
+# Build portable PHAR only
 php it-toolbox app:build it-toolbox --build-version=1.0.0
+
+# Build PHAR + Native Linux & Windows x64 standalone binaries
+./scripts/build-standalone.sh 1.0.0
 ```
 
 ### Running the Test Suite
