@@ -1460,6 +1460,196 @@ PS;
     /**
      * {@inheritDoc}
      */
+    public function printTestPage(string $printerName): ActionResult
+    {
+        $cleanName = str_replace("'", "''", trim($printerName));
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.printer.test_page_failed',
+                details: ['printer' => $printerName, 'driver' => 'Windows'],
+            );
+        }
+
+        $script = sprintf(
+            <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$p = Get-CimInstance -ClassName Win32_Printer | Where-Object { $_.Name -eq '%s' } | Select-Object -First 1;
+if ($null -eq $p) {
+    [PSCustomObject]@{ Success = $false; ReturnValue = -1; Error = 'Printer not found' } | ConvertTo-Json -Compress;
+    exit 0;
+}
+$res = Invoke-CimMethod -InputObject $p -MethodName PrintTestPage -ErrorAction SilentlyContinue;
+$rv = if ($null -ne $res) { [int]$res.ReturnValue } else { -1 };
+[PSCustomObject]@{
+    Success = ($rv -eq 0);
+    ReturnValue = $rv;
+    Error = if ($rv -eq 0) { '' } else { "WMI ReturnValue: $rv" }
+} | ConvertTo-Json -Compress
+PS,
+            $cleanName
+        );
+
+        $data = $this->runPowerShellJson($script);
+        $ok = ($data['Success'] ?? false) === true;
+
+        return new ActionResult(
+            success: $ok,
+            message: $ok ? 'messages.printer.test_page_success' : 'messages.printer.test_page_failed',
+            details: [
+                'printer' => trim($printerName),
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function setDefaultPrinter(string $printerName): ActionResult
+    {
+        $cleanName = str_replace("'", "''", trim($printerName));
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.printer.default_set_failed',
+                details: ['printer' => $printerName, 'driver' => 'Windows'],
+            );
+        }
+
+        $script = sprintf(
+            <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$p = Get-CimInstance -ClassName Win32_Printer | Where-Object { $_.Name -eq '%s' } | Select-Object -First 1;
+if ($null -eq $p) {
+    [PSCustomObject]@{ Success = $false; ReturnValue = -1; Error = 'Printer not found' } | ConvertTo-Json -Compress;
+    exit 0;
+}
+$res = Invoke-CimMethod -InputObject $p -MethodName SetDefaultPrinter -ErrorAction SilentlyContinue;
+$rv = if ($null -ne $res) { [int]$res.ReturnValue } else { -1 };
+[PSCustomObject]@{
+    Success = ($rv -eq 0);
+    ReturnValue = $rv;
+    Error = if ($rv -eq 0) { '' } else { "WMI ReturnValue: $rv" }
+} | ConvertTo-Json -Compress
+PS,
+            $cleanName
+        );
+
+        $data = $this->runPowerShellJson($script);
+        $ok = ($data['Success'] ?? false) === true;
+
+        return new ActionResult(
+            success: $ok,
+            message: $ok ? 'messages.printer.default_set_success' : 'messages.printer.default_set_failed',
+            details: [
+                'printer' => trim($printerName),
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getHardwareInventory(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$cs = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -First 1;
+$bios = Get-CimInstance -ClassName Win32_BIOS | Select-Object -First 1;
+$board = Get-CimInstance -ClassName Win32_BaseBoard | Select-Object -First 1;
+$os = Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object -First 1;
+$cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1;
+$memModules = @(Get-CimInstance -ClassName Win32_PhysicalMemory | ForEach-Object {
+    $capGb = [Math]::Round(($_.Capacity / 1GB), 1);
+    "$($capGb)GB @ $($_.Speed)MHz"
+});
+$disks = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object {
+    [PSCustomObject]@{
+        Model = [string]$_.FriendlyName;
+        Size = [double]$_.Size;
+        MediaType = [string]$_.MediaType;
+        BusType = [string]$_.BusType
+    }
+});
+if ($disks.Count -eq 0) {
+    $disks = @(Get-CimInstance -ClassName Win32_DiskDrive -ErrorAction SilentlyContinue | ForEach-Object {
+        [PSCustomObject]@{
+            Model = [string]$_.Model;
+            Size = [double]$_.Size;
+            MediaType = [string]$_.MediaType;
+            BusType = [string]$_.InterfaceType
+        }
+    });
+}
+[PSCustomObject]@{
+    Hostname = [string]$cs.Name;
+    Manufacturer = [string]$cs.Manufacturer;
+    Model = [string]$cs.Model;
+    Domain = [string]$cs.Domain;
+    SerialNumber = [string]$bios.SerialNumber;
+    BiosVersion = [string]$bios.SMBIOSBIOSVersion;
+    Motherboard = [string]("$($board.Manufacturer) $($board.Product)".Trim());
+    OsName = [string]$os.Caption;
+    OsBuild = [string]("$($os.Version) (Build $($os.BuildNumber))");
+    CpuModel = [string]$cpu.Name;
+    CpuCores = [string]("$($cpu.NumberOfCores) Cores / $($cpu.NumberOfLogicalProcessors) Threads");
+    TotalRamBytes = [double]($cs.TotalPhysicalMemory -as [double]);
+    RamModules = [string]($memModules -join ', ');
+    Disks = @($disks)
+} | ConvertTo-Json -Compress -Depth 4
+PS;
+
+        $data = $this->runPowerShellJson($script);
+        $interfaces = $this->getNetworkInterfaces();
+
+        $physicalDisks = [];
+        foreach ($this->normalizeJsonList((array) ($data['Disks'] ?? [])) as $d) {
+            if (! is_array($d)) {
+                continue;
+            }
+            $physicalDisks[] = [
+                'model' => trim((string) ($d['Model'] ?? 'Physical Disk')) ?: 'Physical Disk',
+                'size' => $this->formatBytes((float) ($d['Size'] ?? 0.0)),
+                'media_type' => trim((string) ($d['MediaType'] ?? 'SSD/HDD')) ?: 'SSD/HDD',
+                'bus_type' => trim((string) ($d['BusType'] ?? 'SATA/NVMe')) ?: 'SATA/NVMe',
+            ];
+        }
+
+        return [
+            'system_identity' => [
+                'hostname' => trim((string) ($data['Hostname'] ?? (gethostname() ?: 'UNKNOWN'))),
+                'manufacturer' => trim((string) ($data['Manufacturer'] ?? 'N/A')) ?: 'N/A',
+                'model' => trim((string) ($data['Model'] ?? 'N/A')) ?: 'N/A',
+                'serial_number' => trim((string) ($data['SerialNumber'] ?? 'N/A')) ?: 'N/A',
+                'bios_version' => trim((string) ($data['BiosVersion'] ?? 'N/A')) ?: 'N/A',
+                'motherboard' => trim((string) ($data['Motherboard'] ?? 'N/A')) ?: 'N/A',
+                'os_edition' => trim((string) ($data['OsName'] ?? 'Windows')) ?: 'Windows',
+                'os_build' => trim((string) ($data['OsBuild'] ?? 'N/A')) ?: 'N/A',
+            ],
+            'processor_memory' => [
+                'cpu_model' => trim((string) ($data['CpuModel'] ?? 'Unknown CPU')) ?: 'Unknown CPU',
+                'cpu_cores' => trim((string) ($data['CpuCores'] ?? 'N/A')) ?: 'N/A',
+                'ram_total' => $this->formatBytes((float) ($data['TotalRamBytes'] ?? 0.0)),
+                'ram_modules' => trim((string) ($data['RamModules'] ?? 'N/A')) ?: 'N/A',
+            ],
+            'physical_disks' => $physicalDisks,
+            'network_adapters' => array_map(
+                fn (array $iface): array => [
+                    'interface' => $iface['interface'] ?? '-',
+                    'ipv4' => $iface['ipv4'] ?? '-',
+                    'mac' => $iface['mac'] ?? '-',
+                    'status' => $iface['status'] ?? '-',
+                ],
+                $interfaces
+            ),
+        ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     protected function getDefaultBrowserCachePaths(): array
     {
         $localAppData = (string) (getenv('LOCALAPPDATA') ?: ((getenv('USERPROFILE') ?: 'C:\\Users\\Default') . '\\AppData\\Local'));

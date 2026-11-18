@@ -124,6 +124,22 @@ interface SystemDriverInterface
     public function clearPrintQueue(): ActionResult;
 
     /**
+     * Send a test page to the specified printer.
+     *
+     * @param  string  $printerName
+     * @return ActionResult
+     */
+    public function printTestPage(string $printerName): ActionResult;
+
+    /**
+     * Set the system default printer.
+     *
+     * @param  string  $printerName
+     * @return ActionResult
+     */
+    public function setDefaultPrinter(string $printerName): ActionResult;
+
+    /**
      * Retrieve active network interfaces, IPv4/IPv6, Gateway, DNS, and MAC addresses.
      *
      * @return array<int, array{interface: string, ipv4: string, ipv6?: string, gateway?: string, dns?: string, mac: string, status: string}>
@@ -272,4 +288,25 @@ interface SystemDriverInterface
      * @return array<int, array{ip: string, host: string, status: string, icon: string}>
      */
     public function inspectHostsFile(?string $customContent = null): array;
+
+    /**
+     * Run a fast, zero-dependency CPU single-core and Disk sequential I/O micro-benchmark.
+     *
+     * @param  int  $diskSizeMb  Temporary file size in MB (default 64 MB).
+     * @param  float  $cpuDurationSeconds  Duration of the CPU SHA-256 loop in seconds (default 1.0s).
+     * @return ActionResult
+     */
+    public function runSystemBenchmark(int $diskSizeMb = 64, float $cpuDurationSeconds = 1.0): ActionResult;
+
+    /**
+     * Retrieve a complete corporate IT asset & hardware inventory profile (ready for GLPI / CMDB).
+     *
+     * @return array{
+     *     system_identity: array<string, string>,
+     *     processor_memory: array<string, string>,
+     *     physical_disks: array<int, array{model: string, size: string, media_type: string, bus_type: string}>,
+     *     network_adapters: array<int, array{interface: string, ipv4: string, mac: string, status: string}>
+     * }
+     */
+    public function getHardwareInventory(): array;
 }

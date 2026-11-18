@@ -379,3 +379,84 @@ it('executes Linux package integrity audit, pending APT updates, cron/systemd sc
         ->and($shares[0]['type'])->toBe('Samba (SMB)')
         ->and($shares[1]['type'])->toBe('NFS Export');
 });
+
+it('handles Linux CUPS test page, default printer, CPU/Disk micro-benchmark, and DMI hardware inventory', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        /** @var array<string, string> */
+        public array $files = [
+            '/etc/os-release' => "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nVERSION=\"24.04\"\n",
+            '/proc/sys/kernel/hostname' => "ubuntu-asset-01\n",
+            '/proc/uptime' => "3600.00 7200.00\n",
+            '/proc/cpuinfo' => "processor\t: 0\nmodel name\t: AMD Ryzen 9 7950X\ncpu cores\t: 16\n",
+            '/proc/loadavg' => "0.15 0.10 0.05 1/100 500\n",
+            '/proc/meminfo' => "MemTotal:       33554432 kB\nMemAvailable:   25165824 kB\n",
+            '/etc/resolv.conf' => "nameserver 1.1.1.1\n",
+            '/sys/class/dmi/id/sys_vendor' => "LENOVO\n",
+            '/sys/class/dmi/id/product_name' => "ThinkPad P16 Gen 2\n",
+            '/sys/class/dmi/id/product_serial' => "PF4X9988\n",
+            '/sys/class/dmi/id/bios_version' => "N3XET50W\n",
+            '/sys/class/dmi/id/board_vendor' => "LENOVO\n",
+            '/sys/class/dmi/id/board_name' => "21FA0011BR\n",
+        ];
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            if ($command[0] === 'lp') {
+                return new ProcessResult(0, 'request id is Office_CUPS-77 (1 file(s))');
+            }
+
+            return match ($command) {
+                ['lpoptions', '-d', 'Office_CUPS'] => new ProcessResult(0, ''),
+                ['uname', '-r'] => new ProcessResult(0, '6.8.0-45-generic'),
+                ['uname', '-m'] => new ProcessResult(0, 'x86_64'),
+                ['ip', '-j', 'route'] => new ProcessResult(0, json_encode([['dst' => 'default', 'gateway' => '192.168.1.1', 'dev' => 'eth0']])),
+                ['ip', '-j', 'addr'] => new ProcessResult(0, json_encode([[
+                    'ifname' => 'eth0',
+                    'operstate' => 'UP',
+                    'address' => 'aa:bb:cc:dd:ee:ff',
+                    'addr_info' => [['family' => 'inet', 'local' => '192.168.1.50', 'prefixlen' => 24]],
+                ]])),
+                ['lsblk', '-d', '-b', '-o', 'NAME,SIZE,ROTA,TRAN,MODEL', '-J'] => new ProcessResult(0, json_encode([
+                    'blockdevices' => [
+                        ['name' => 'nvme0n1', 'size' => 1024209543168, 'rota' => false, 'tran' => 'nvme', 'model' => 'WD Black SN850X 1TB'],
+                    ],
+                ])),
+                default => new ProcessResult(1, '', '', false),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return $this->files[$path] ?? null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 1000;
+        }
+    };
+
+    $driver = new LinuxDriver($executor);
+
+    $testPage = $driver->printTestPage('Office_CUPS');
+    expect($testPage->success)->toBeTrue()
+        ->and($testPage->message)->toBe('messages.printer.test_page_success');
+
+    $defaultSet = $driver->setDefaultPrinter('Office_CUPS');
+    expect($defaultSet->success)->toBeTrue()
+        ->and($defaultSet->message)->toBe('messages.printer.default_set_success');
+
+    $inventory = $driver->getHardwareInventory();
+    expect($inventory['system_identity']['hostname'])->toBe('ubuntu-asset-01')
+        ->and($inventory['system_identity']['manufacturer'])->toBe('LENOVO')
+        ->and($inventory['system_identity']['serial_number'])->toBe('PF4X9988')
+        ->and($inventory['processor_memory']['ram_total'])->toBe('32.00 GB')
+        ->and($inventory['physical_disks'])->toHaveCount(1)
+        ->and($inventory['physical_disks'][0]['media_type'])->toBe('SSD / NVMe');
+
+    $bench = $driver->runSystemBenchmark(1, 0.05);
+    expect($bench->success)->toBeTrue()
+        ->and($bench->message)->toBe('messages.toolbox.benchmark_success')
+        ->and($bench->details['cpu_score'])->toContain('SHA-256 ops/sec');
+});

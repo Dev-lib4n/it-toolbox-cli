@@ -68,8 +68,6 @@ class ToolboxMenuCommand extends Command
 
             if ($choice === '1') {
                 $this->executeSubcommand('health:check', $locale);
-            } elseif ($choice === '7') {
-                $this->executeSubcommand('report:export', $locale);
             } elseif ($choice === '8') {
                 $this->executeSubcommand('self:update', $locale);
             } elseif ($choice === '9') {
@@ -81,6 +79,7 @@ class ToolboxMenuCommand extends Command
                     '4' => 'network',
                     '5' => 'maintenance',
                     '6' => 'security',
+                    '7' => 'reports',
                     default => 'system',
                 };
 
@@ -172,6 +171,8 @@ class ToolboxMenuCommand extends Command
                 'printers' => [
                     '1' => ['label' => (string) __('messages.menu.actions.printer_list'), 'command' => 'printer:list'],
                     '2' => ['label' => (string) __('messages.menu.actions.printer_clear'), 'command' => 'printer:clear'],
+                    '3' => ['label' => (string) __('messages.menu.actions.printer_test_page'), 'command' => 'printer:test-page'],
+                    '4' => ['label' => (string) __('messages.menu.actions.printer_default'), 'command' => 'printer:default'],
                 ],
                 'network' => [
                     '1' => ['label' => (string) __('messages.menu.actions.network_check'), 'command' => 'network:check'],
@@ -197,6 +198,11 @@ class ToolboxMenuCommand extends Command
                     '2' => ['label' => (string) __('messages.menu.actions.security_users'), 'command' => 'security:users'],
                     '3' => ['label' => (string) __('messages.menu.actions.security_shares'), 'command' => 'security:shares'],
                     '4' => ['label' => (string) __('messages.menu.actions.security_hosts'), 'command' => 'security:hosts'],
+                ],
+                'reports' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.report_export'), 'command' => 'report:export'],
+                    '2' => ['label' => (string) __('messages.menu.actions.toolbox_inventory'), 'command' => 'toolbox:inventory'],
+                    '3' => ['label' => (string) __('messages.menu.actions.toolbox_benchmark'), 'command' => 'toolbox:benchmark'],
                 ],
                 default => [],
             };
