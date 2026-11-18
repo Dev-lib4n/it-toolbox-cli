@@ -56,7 +56,8 @@ class NetCheckCommand extends Command
                 headers: [
                     (string) __('messages.network.interface_headers.interface'),
                     (string) __('messages.network.interface_headers.ipv4'),
-                    (string) __('messages.network.interface_headers.ipv6'),
+                    (string) __('messages.network.interface_headers.gateway'),
+                    (string) __('messages.network.interface_headers.dns'),
                     (string) __('messages.network.interface_headers.mac'),
                     (string) __('messages.network.interface_headers.status'),
                 ],
@@ -64,7 +65,8 @@ class NetCheckCommand extends Command
                     fn (array $iface): array => [
                         $iface['interface'] ?? '-',
                         $iface['ipv4'] ?? '-',
-                        $iface['ipv6'] ?? '-',
+                        $iface['gateway'] ?? '-',
+                        $iface['dns'] ?? '-',
                         $iface['mac'] ?? '-',
                         $iface['status'] ?? '-',
                     ],

@@ -46,9 +46,9 @@ interface SystemDriverInterface
     public function killProcess(int $pid): ActionResult;
 
     /**
-     * List installed printers and their current status.
+     * List installed printers, their current status, and pending print jobs.
      *
-     * @return array<int, array{name: string, status: string, default: string, driver: string, port: string}>
+     * @return array<int, array{name: string, status: string, default: string, driver: string, port: string, jobs?: string}>
      */
     public function listPrinters(): array;
 
@@ -60,14 +60,14 @@ interface SystemDriverInterface
     public function clearPrintQueue(): ActionResult;
 
     /**
-     * Retrieve active network interfaces, IP addresses, and MAC addresses.
+     * Retrieve active network interfaces, IPv4/IPv6, Gateway, DNS, and MAC addresses.
      *
-     * @return array<int, array{interface: string, ipv4: string, ipv6: string, mac: string, status: string}>
+     * @return array<int, array{interface: string, ipv4: string, ipv6?: string, gateway?: string, dns?: string, mac: string, status: string}>
      */
     public function getNetworkInterfaces(): array;
 
     /**
-     * Run connectivity health checks (gateway, external ICMP ping, DNS resolution).
+     * Run connectivity health checks (adapter, gateway, external ICMP ping, DNS resolution).
      *
      * @return array<int, array{target: string, check: string, status: string, latency: string}>
      */
