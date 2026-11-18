@@ -1118,71 +1118,64 @@ PS;
 
     /**
      * {@inheritDoc}
+     *
+     * @param  array<int, string>|null  $customTargets
      */
-    public function cleanTempFiles(): ActionResult
+    public function cleanTempFiles(?array $customTargets = null): ActionResult
     {
-        $script = <<<'PS'
-$ErrorActionPreference = 'SilentlyContinue';
-$targets = @($env:TEMP, 'C:\Windows\Temp') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique;
-$sizeBefore = 0.0;
-$sizeAfter = 0.0;
-$deletedFiles = 0;
-$skippedFiles = 0;
-
-foreach ($dir in $targets) {
-    if (Test-Path -LiteralPath $dir) {
-        $filesBefore = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue);
-        $sizeBefore += [double](($filesBefore | Measure-Object -Property Length -Sum).Sum);
-
-        $items = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue);
-        foreach ($item in $items) {
-            Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue;
-            if (Test-Path -LiteralPath $item.FullName) {
-                $skippedFiles++;
-            } else {
-                $deletedFiles++;
+        if ($customTargets !== null) {
+            $targets = array_values(array_unique(array_filter(
+                array_map('trim', $customTargets),
+                fn (string $path): bool => $path !== ''
+            )));
+        } else {
+            $userTemp = trim((string) (getenv('TEMP') ?: getenv('TMP') ?: ''));
+            $candidates = array_filter([$userTemp, 'C:\\Windows\\Temp'], fn (string $path): bool => $path !== '');
+            $seenKeys = [];
+            $targets = [];
+            foreach ($candidates as $candidate) {
+                $key = strtolower(rtrim($candidate, '\\/'));
+                if (! isset($seenKeys[$key])) {
+                    $seenKeys[$key] = true;
+                    $targets[] = $candidate;
+                }
             }
         }
 
-        $filesAfter = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue);
-        $sizeAfter += [double](($filesAfter | Measure-Object -Property Length -Sum).Sum);
-    }
-}
+        $deletedFiles = 0;
+        $skippedFiles = 0;
+        $freedBytes = 0.0;
+        $processedPaths = [];
 
-$freedBytes = [Math]::Max(0.0, $sizeBefore - $sizeAfter);
-[PSCustomObject]@{
-    FreedBytes = [double]$freedBytes;
-    DeletedFiles = [int]$deletedFiles;
-    SkippedFiles = [int]$skippedFiles;
-    Targets = @($targets)
-} | ConvertTo-Json -Compress
-PS;
+        foreach ($targets as $dir) {
+            if (! @is_dir($dir)) {
+                continue;
+            }
 
-        $data = $this->runPowerShellJson($script, 60);
-        $this->processRunner->run(['ipconfig', '/flushdns']);
+            if (! @is_readable($dir)) {
+                $skippedFiles++;
 
-        if ($data === []) {
-            return new ActionResult(
-                success: false,
-                message: 'messages.maintenance.clean_failed',
-                details: ['driver' => 'Windows'],
-            );
+                continue;
+            }
+
+            $processedPaths[] = $dir;
+            $stats = $this->purgeDirectorySafely($dir);
+            $deletedFiles += $stats['deleted'];
+            $skippedFiles += $stats['skipped'];
+            $freedBytes += $stats['freed_bytes'];
         }
 
-        $freedBytes = max(0.0, (float) ($data['FreedBytes'] ?? 0.0));
-        $paths = isset($data['Targets']) && is_array($data['Targets'])
-            ? array_map('strval', $data['Targets'])
-            : ['%TEMP%', 'C:\\Windows\\Temp'];
+        $this->processRunner->run(['ipconfig', '/flushdns']);
 
         return new ActionResult(
             success: true,
             message: 'messages.maintenance.clean_success',
             details: [
-                'deleted_files' => (int) ($data['DeletedFiles'] ?? 0),
-                'skipped_locked_files' => (int) ($data['SkippedFiles'] ?? 0),
+                'deleted_files' => $deletedFiles,
+                'skipped_locked_files' => $skippedFiles,
                 'freed_space' => $this->formatBytes($freedBytes),
-                'paths' => $paths,
-                'commands_executed' => ['Remove-Item Temp', 'ipconfig /flushdns'],
+                'paths' => $processedPaths !== [] ? $processedPaths : ($targets !== [] ? $targets : ['%TEMP%', 'C:\\Windows\\Temp']),
+                'commands_executed' => ['Resilient Temp Cleanup', 'ipconfig /flushdns'],
                 'driver' => 'Windows',
             ],
         );
@@ -1674,12 +1667,19 @@ PS;
     /**
      * {@inheritDoc}
      */
-    protected function readHostsFileContent(): ?string
+    protected function getHostsFilePath(): string
     {
         $systemRoot = (string) (getenv('SystemRoot') ?: 'C:\\Windows');
-        $hostsPath = $systemRoot . '\\System32\\drivers\\etc\\hosts';
 
-        return $this->processRunner->readFile($hostsPath);
+        return $systemRoot . '\\System32\\drivers\\etc\\hosts';
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function readHostsFileContent(): ?string
+    {
+        return $this->processRunner->readFile($this->getHostsFilePath());
     }
 
     /**

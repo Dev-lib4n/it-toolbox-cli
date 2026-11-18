@@ -1195,13 +1195,15 @@ class LinuxDriver implements SystemDriverInterface
 
     /**
      * {@inheritDoc}
+     *
+     * @param  array<int, string>|null  $customTargets
      */
-    public function cleanTempFiles(): ActionResult
+    public function cleanTempFiles(?array $customTargets = null): ActionResult
     {
         $isRoot = $this->isRoot();
         $currentUid = $this->getEffectiveUid();
         $cutoffTimestamp = time() - 86400; // 24 hours ago
-        $targets = $this->tempDirectories ?? ['/tmp', '/var/tmp'];
+        $targets = $customTargets ?? $this->tempDirectories ?? ['/tmp', '/var/tmp'];
 
         $deletedFiles = 0;
         $skippedFiles = 0;
@@ -1209,7 +1211,13 @@ class LinuxDriver implements SystemDriverInterface
         $commandsExecuted = [];
 
         foreach ($targets as $dir) {
-            if (! is_dir($dir) || ! is_readable($dir)) {
+            if ($dir === '' || ! @is_dir($dir)) {
+                continue;
+            }
+
+            if (! @is_readable($dir)) {
+                $skippedFiles++;
+
                 continue;
             }
 
@@ -1217,35 +1225,65 @@ class LinuxDriver implements SystemDriverInterface
                 $iterator = new FilesystemIterator($dir, FilesystemIterator::SKIP_DOTS);
                 /** @var SplFileInfo $entry */
                 foreach ($iterator as $entry) {
-                    $filename = $entry->getFilename();
+                    try {
+                        if ($entry->isLink()) {
+                            $skippedFiles++;
 
-                    if ($this->isProtectedTempEntry($filename)) {
+                            continue;
+                        }
+
+                        $pathname = $entry->getPathname();
+                        if (@readlink($pathname) !== false) {
+                            $skippedFiles++;
+
+                            continue;
+                        }
+
+                        $filename = $entry->getFilename();
+                        if ($this->isProtectedTempEntry($filename)) {
+                            $skippedFiles++;
+
+                            continue;
+                        }
+
+                        $ownerUid = @$entry->getOwner();
+                        $mtime = @$entry->getMTime();
+
+                        if (! $isRoot && $ownerUid !== false && $ownerUid !== $currentUid) {
+                            $skippedFiles++;
+
+                            continue;
+                        }
+
+                        if ($isRoot && $mtime !== false && $mtime > $cutoffTimestamp) {
+                            $skippedFiles++;
+
+                            continue;
+                        }
+
+                        if ($entry->isFile()) {
+                            $size = @$entry->getSize();
+                            if (@unlink($pathname)) {
+                                $deletedFiles++;
+                                $freedBytes += ($size !== false && $size > 0) ? (float) $size : 0.0;
+                            } else {
+                                $skippedFiles++;
+                            }
+
+                            continue;
+                        }
+
+                        if ($entry->isDir()) {
+                            $stats = $this->purgeDirectorySafely($pathname);
+                            $deletedFiles += $stats['deleted'];
+                            $skippedFiles += $stats['skipped'];
+                            $freedBytes += $stats['freed_bytes'];
+                            @rmdir($pathname);
+                        }
+                    } catch (Throwable) {
                         $skippedFiles++;
 
                         continue;
-                    }
-
-                    $ownerUid = @$entry->getOwner();
-                    $mtime = @$entry->getMTime();
-
-                    if (! $isRoot && $ownerUid !== false && $ownerUid !== $currentUid) {
-                        $skippedFiles++;
-
-                        continue;
-                    }
-
-                    if ($isRoot && $mtime !== false && $mtime > $cutoffTimestamp) {
-                        $skippedFiles++;
-
-                        continue;
-                    }
-
-                    $entrySize = $this->calculatePathSize($entry->getPathname());
-                    if ($this->deletePathSafely($entry->getPathname())) {
-                        $deletedFiles++;
-                        $freedBytes += $entrySize;
-                    } else {
-                        $skippedFiles++;
                     }
                 }
             } catch (Throwable) {
@@ -1872,9 +1910,17 @@ class LinuxDriver implements SystemDriverInterface
     /**
      * {@inheritDoc}
      */
+    protected function getHostsFilePath(): string
+    {
+        return '/etc/hosts';
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     protected function readHostsFileContent(): ?string
     {
-        return $this->readFile('/etc/hosts');
+        return $this->readFile($this->getHostsFilePath());
     }
 
     /**
@@ -2460,65 +2506,6 @@ class LinuxDriver implements SystemDriverInterface
         return str_ends_with($filename, '.lock')
             || str_ends_with($filename, '.pid')
             || str_ends_with($filename, '.sock');
-    }
-
-    /**
-     * Calculate byte size of a file or directory tree safely.
-     */
-    protected function calculatePathSize(string $path): float
-    {
-        if (is_link($path)) {
-            return 0.0;
-        }
-
-        if (is_file($path)) {
-            $size = @filesize($path);
-
-            return $size !== false ? (float) $size : 0.0;
-        }
-
-        if (! is_dir($path) || ! is_readable($path)) {
-            return 0.0;
-        }
-
-        $total = 0.0;
-        try {
-            $iterator = new FilesystemIterator($path, FilesystemIterator::SKIP_DOTS);
-            /** @var SplFileInfo $item */
-            foreach ($iterator as $item) {
-                $total += $this->calculatePathSize($item->getPathname());
-            }
-        } catch (Throwable) {
-            // Ignore unreadable subdirectories
-        }
-
-        return $total;
-    }
-
-    /**
-     * Recursively delete a temporary file or directory safely.
-     */
-    protected function deletePathSafely(string $path): bool
-    {
-        if (is_link($path) || is_file($path)) {
-            return @unlink($path);
-        }
-
-        if (! is_dir($path)) {
-            return false;
-        }
-
-        try {
-            $iterator = new FilesystemIterator($path, FilesystemIterator::SKIP_DOTS);
-            /** @var SplFileInfo $item */
-            foreach ($iterator as $item) {
-                $this->deletePathSafely($item->getPathname());
-            }
-        } catch (Throwable) {
-            return false;
-        }
-
-        return @rmdir($path);
     }
 
     /**

@@ -215,6 +215,7 @@ return [
             'valid' => 'Valid',
             'broken' => 'Missing / Broken',
             'duplicate' => 'Duplicate',
+            'network_unc' => 'Network UNC (Skipped)',
         ],
         'path_summary' => 'PATH Audit Summary -> ✅ Valid: :valid  |  ❌ Missing/Broken: :broken  |  ⚠️ Duplicate: :duplicate',
     ],
@@ -396,6 +397,7 @@ return [
         'browsers_section' => 'Web Browser Cache Cleanup (Chrome, Edge, Firefox)',
         'confirm_browsers_clean' => 'This will clean ONLY temporary browser cache files (passwords, history, cookies, and bookmarks are preserved). Proceed?',
         'browsers_clean_success' => 'Browser cache directories cleaned safely.',
+        'browsers_clean_partial' => 'Browser cache partially cleaned; some locked files currently in use by an open browser were safely skipped.',
         'updates_section' => 'Pending OS & Package Updates',
         'no_pending_updates' => 'System is up to date. No pending updates found.',
         'updates_headers' => [
@@ -522,6 +524,7 @@ return [
             'description' => 'Permissions / Comment',
         ],
         'hosts_section' => 'System Hosts File Inspector (/etc/hosts)',
+        'hosts_permission_denied' => 'Unable to read the system hosts file (permission denied or blocked by OS/antivirus protection).',
         'no_hosts_entries' => 'No active host mappings found in the system hosts file.',
         'hosts_headers' => [
             'ip' => 'Target IP Address',

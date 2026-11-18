@@ -215,6 +215,7 @@ return [
             'valid' => 'Válido',
             'broken' => 'Inexistente / Quebrado',
             'duplicate' => 'Duplicado',
+            'network_unc' => 'Rede UNC (Ignorado)',
         ],
         'path_summary' => 'Resumo do PATH -> ✅ Válidos: :valid  |  ❌ Inexistentes/Quebrados: :broken  |  ⚠️ Duplicados: :duplicate',
     ],
@@ -396,6 +397,7 @@ return [
         'browsers_section' => 'Limpeza de Cache de Navegadores Web (Chrome, Edge, Firefox)',
         'confirm_browsers_clean' => 'Isto limpará APENAS arquivos temporários de cache dos navegadores (senhas, histórico, cookies e favoritos serão preservados). Deseja prosseguir?',
         'browsers_clean_success' => 'Diretórios de cache dos navegadores limpos com segurança.',
+        'browsers_clean_partial' => 'Limpeza parcial do cache concluída; parte dos arquivos estava em uso pelo navegador aberto e foi ignorada com segurança.',
         'updates_section' => 'Atualizações Pendentes do SO e Pacotes',
         'no_pending_updates' => 'O sistema está atualizado. Nenhuma atualização pendente encontrada.',
         'updates_headers' => [
@@ -522,6 +524,7 @@ return [
             'description' => 'Permissões / Comentário',
         ],
         'hosts_section' => 'Inspetor do Arquivo Hosts do Sistema (/etc/hosts)',
+        'hosts_permission_denied' => 'Não foi possível ler o arquivo hosts do sistema (permissão negada ou bloqueado pelo SO/antivírus).',
         'no_hosts_entries' => 'Nenhum mapeamento de host ativo encontrado no arquivo hosts.',
         'hosts_headers' => [
             'ip' => 'Endereço IP Alvo',

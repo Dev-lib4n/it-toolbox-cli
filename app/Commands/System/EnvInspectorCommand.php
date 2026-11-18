@@ -64,6 +64,7 @@ class EnvInspectorCommand extends Command
             'VALID' => (string) __('messages.system.path_states.valid'),
             'BROKEN' => (string) __('messages.system.path_states.broken'),
             'DUPLICATE' => (string) __('messages.system.path_states.duplicate'),
+            'NETWORK_UNC' => (string) __('messages.system.path_states.network_unc'),
         ];
 
         table(

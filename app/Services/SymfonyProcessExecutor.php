@@ -41,13 +41,17 @@ class SymfonyProcessExecutor implements ProcessExecutorInterface
      */
     public function readFile(string $path): ?string
     {
-        if (! is_readable($path)) {
+        try {
+            if ($path === '' || ! @is_file($path) || ! @is_readable($path)) {
+                return null;
+            }
+
+            $content = @file_get_contents($path);
+
+            return $content === false ? null : $content;
+        } catch (Throwable) {
             return null;
         }
-
-        $content = @file_get_contents($path);
-
-        return $content === false ? null : $content;
     }
 
     /**

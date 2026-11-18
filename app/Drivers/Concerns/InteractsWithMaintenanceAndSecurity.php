@@ -73,15 +73,78 @@ trait InteractsWithMaintenanceAndSecurity
             }
         };
 
+        $this->scanDirectorySafely(
+            directory: $targetDir,
+            onFile: function (SplFileInfo $file, string $pathname) use ($heap, $safeLimit): void {
+                if (! $file->isFile()) {
+                    return;
+                }
+
+                $rawSize = @$file->getSize();
+                if ($rawSize === false || $rawSize <= 0) {
+                    return;
+                }
+
+                $sizeBytes = (float) $rawSize;
+                if ($heap->count() >= $safeLimit) {
+                    /** @var array{path: string, size_bytes: float, size_formatted: string, modified_at: string} $smallest */
+                    $smallest = $heap->top();
+                    if ($sizeBytes <= $smallest['size_bytes']) {
+                        return;
+                    }
+                    $heap->extract();
+                }
+
+                $mtime = @$file->getMTime();
+                $heap->insert([
+                    'path' => $pathname,
+                    'size_bytes' => $sizeBytes,
+                    'size_formatted' => $this->formatBytes($sizeBytes),
+                    'modified_at' => $mtime !== false ? date('Y-m-d H:i', $mtime) : '-',
+                ]);
+            },
+            shouldDescendDir: fn (SplFileInfo $dir): bool => ! in_array(strtolower($dir->getFilename()), self::IGNORED_SCAN_DIRS, true),
+        );
+
+        $topFiles = [];
+        while (! $heap->isEmpty()) {
+            $topFiles[] = $heap->extract();
+        }
+
+        usort(
+            $topFiles,
+            fn (array $a, array $b): int => ($b['size_bytes'] <=> $a['size_bytes']) ?: ($a['path'] <=> $b['path'])
+        );
+
+        return $topFiles;
+    }
+
+    /**
+     * Traverse a directory tree safely without crashing on Windows Junction Points, symlinks, or ACL permission errors.
+     *
+     * @param  callable(SplFileInfo, string): void  $onFile
+     * @param  (callable(SplFileInfo, string): bool)|null  $shouldDescendDir
+     * @param  (callable(string): void)|null  $onUnreadableDir
+     */
+    protected function scanDirectorySafely(
+        string $directory,
+        callable $onFile,
+        ?callable $shouldDescendDir = null,
+        ?callable $onUnreadableDir = null,
+    ): void {
+        if ($directory === '' || ! @is_dir($directory) || ! @is_readable($directory)) {
+            return;
+        }
+
         try {
             $dirIterator = new RecursiveDirectoryIterator(
-                $targetDir,
+                $directory,
                 RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::CURRENT_AS_FILEINFO
             );
 
             $filterIterator = new RecursiveCallbackFilterIterator(
                 $dirIterator,
-                function (SplFileInfo $current): bool {
+                function (SplFileInfo $current) use ($shouldDescendDir, $onUnreadableDir): bool {
                     try {
                         if ($current->isLink()) {
                             return false;
@@ -98,12 +161,16 @@ trait InteractsWithMaintenanceAndSecurity
 
                         if ($current->isDir()) {
                             if (! @is_readable($pathname)) {
+                                if ($onUnreadableDir !== null) {
+                                    $onUnreadableDir($pathname);
+                                }
+
                                 return false;
                             }
 
-                            $lowerName = strtolower($current->getFilename());
-
-                            return ! in_array($lowerName, self::IGNORED_SCAN_DIRS, true);
+                            if ($shouldDescendDir !== null && ! $shouldDescendDir($current, $pathname)) {
+                                return false;
+                            }
                         }
 
                         return true;
@@ -119,59 +186,87 @@ trait InteractsWithMaintenanceAndSecurity
                 RecursiveIteratorIterator::CATCH_GET_CHILD
             );
 
-            /** @var SplFileInfo $file */
-            foreach ($iterator as $file) {
+            /** @var SplFileInfo $item */
+            foreach ($iterator as $item) {
                 try {
-                    if ($file->isLink() || ! $file->isFile()) {
+                    if ($item->isLink()) {
                         continue;
                     }
 
-                    $pathname = $file->getPathname();
+                    $pathname = $item->getPathname();
                     if (@readlink($pathname) !== false) {
                         continue;
                     }
 
-                    $rawSize = @$file->getSize();
-                    if ($rawSize === false || $rawSize <= 0) {
-                        continue;
-                    }
-
-                    $sizeBytes = (float) $rawSize;
-                    if ($heap->count() >= $safeLimit) {
-                        /** @var array{path: string, size_bytes: float, size_formatted: string, modified_at: string} $smallest */
-                        $smallest = $heap->top();
-                        if ($sizeBytes <= $smallest['size_bytes']) {
-                            continue;
-                        }
-                        $heap->extract();
-                    }
-
-                    $mtime = @$file->getMTime();
-                    $heap->insert([
-                        'path' => $pathname,
-                        'size_bytes' => $sizeBytes,
-                        'size_formatted' => $this->formatBytes($sizeBytes),
-                        'modified_at' => $mtime !== false ? date('Y-m-d H:i', $mtime) : '-',
-                    ]);
+                    $onFile($item, $pathname);
                 } catch (Throwable) {
                     continue;
                 }
             }
         } catch (Throwable) {
-            // Gracefully return partial top-N results collected before any root permission boundary
+            // Gracefully tolerate top-level permission or junction boundaries
         }
+    }
 
-        $topFiles = [];
-        while (! $heap->isEmpty()) {
-            $topFiles[] = $heap->extract();
-        }
+    /**
+     * Delete all accessible files and empty subdirectories within a target folder safely,
+     * counting only bytes actually freed and skipping locked entries without aborting.
+     *
+     * @return array{deleted: int, skipped: int, freed_bytes: float}
+     */
+    protected function purgeDirectorySafely(string $directory): array
+    {
+        $deleted = 0;
+        $skipped = 0;
+        $freedBytes = 0.0;
+        /** @var array<int, string> $directories */
+        $directories = [];
 
-        usort(
-            $topFiles,
-            fn (array $a, array $b): int => ($b['size_bytes'] <=> $a['size_bytes']) ?: ($a['path'] <=> $b['path'])
+        $this->scanDirectorySafely(
+            directory: $directory,
+            onFile: function (SplFileInfo $item, string $pathname) use (&$directories, &$deleted, &$skipped, &$freedBytes): void {
+                if ($item->isDir()) {
+                    $directories[] = $pathname;
+
+                    return;
+                }
+
+                if (! $item->isFile()) {
+                    return;
+                }
+
+                $size = @$item->getSize();
+                $fileBytes = ($size !== false && $size > 0) ? (float) $size : 0.0;
+
+                try {
+                    if (@unlink($pathname)) {
+                        $deleted++;
+                        $freedBytes += $fileBytes;
+                    } else {
+                        $skipped++;
+                    }
+                } catch (Throwable) {
+                    $skipped++;
+                }
+            },
+            onUnreadableDir: function () use (&$skipped): void {
+                $skipped++;
+            },
         );
 
-        return $topFiles;
+        foreach (array_reverse($directories) as $subDir) {
+            try {
+                @rmdir($subDir);
+            } catch (Throwable) {
+                // Keep directories still containing active/locked files
+            }
+        }
+
+        return [
+            'deleted' => $deleted,
+            'skipped' => $skipped,
+            'freed_bytes' => $freedBytes,
+        ];
     }
 
     /**
@@ -207,43 +302,108 @@ trait InteractsWithMaintenanceAndSecurity
         $cleanedBrowsers = [];
 
         foreach ($targets as $browserLabel => $cacheDir) {
-            if ($cacheDir === '' || ! is_dir($cacheDir) || ! is_readable($cacheDir)) {
+            if ($cacheDir === '' || ! @is_dir($cacheDir)) {
                 continue;
             }
 
-            $browserFreed = 0.0;
-            try {
-                $iterator = new FilesystemIterator($cacheDir, FilesystemIterator::SKIP_DOTS);
-                /** @var SplFileInfo $entry */
-                foreach ($iterator as $entry) {
-                    $path = $entry->getPathname();
-                    $entrySize = $this->calculateCacheEntrySize($path);
-
-                    if ($this->deleteCacheEntrySafely($path)) {
-                        $deletedFiles++;
-                        $freedBytes += $entrySize;
-                        $browserFreed += $entrySize;
-                    } else {
-                        $skippedFiles++;
-                    }
-                }
-            } catch (Throwable) {
+            if (! @is_readable($cacheDir)) {
                 $skippedFiles++;
+
+                continue;
             }
 
-            if ($browserFreed > 0.0 || ! in_array($browserLabel, $cleanedBrowsers, true)) {
+            $stats = $this->purgeDirectorySafely($cacheDir);
+            $deletedFiles += $stats['deleted'];
+            $skippedFiles += $stats['skipped'];
+            $freedBytes += $stats['freed_bytes'];
+
+            if ($stats['deleted'] > 0 || $stats['skipped'] > 0 || ! in_array($browserLabel, $cleanedBrowsers, true)) {
                 $cleanedBrowsers[] = (string) $browserLabel;
             }
         }
 
+        $messageKey = $skippedFiles > 0
+            ? 'messages.maintenance.browsers_clean_partial'
+            : 'messages.maintenance.browsers_clean_success';
+
         return new ActionResult(
             success: true,
-            message: 'messages.maintenance.browsers_clean_success',
+            message: $messageKey,
             details: [
                 'browsers_cleaned' => $cleanedBrowsers !== [] ? $cleanedBrowsers : ['None Detected'],
                 'deleted_files' => $deletedFiles,
                 'skipped_locked_files' => $skippedFiles,
                 'freed_space' => $this->formatBytes($freedBytes),
+                'driver' => $this->getDriverLabel(),
+            ],
+        );
+    }
+
+    /**
+     * Safely validate and read the system hosts file (or a custom hosts path) and return parsed entries
+     * wrapped in an ActionResult, returning a permission error if blocked by OS/antivirus protection.
+     */
+    public function getHostsEntries(?string $customPath = null): ActionResult
+    {
+        $hostsPath = $customPath ?? $this->getHostsFilePath();
+
+        if ($customPath !== null) {
+            try {
+                if (! @is_file($hostsPath) || ! @is_readable($hostsPath)) {
+                    return new ActionResult(
+                        success: false,
+                        message: 'messages.security.hosts_permission_denied',
+                        details: [
+                            'paths' => [$hostsPath],
+                            'driver' => $this->getDriverLabel(),
+                        ],
+                    );
+                }
+
+                $raw = @file_get_contents($hostsPath);
+                if ($raw === false) {
+                    return new ActionResult(
+                        success: false,
+                        message: 'messages.security.hosts_permission_denied',
+                        details: [
+                            'paths' => [$hostsPath],
+                            'driver' => $this->getDriverLabel(),
+                        ],
+                    );
+                }
+            } catch (Throwable) {
+                return new ActionResult(
+                    success: false,
+                    message: 'messages.security.hosts_permission_denied',
+                    details: [
+                        'paths' => [$hostsPath],
+                        'driver' => $this->getDriverLabel(),
+                    ],
+                );
+            }
+        } else {
+            $raw = $this->readHostsFileContent();
+            if ($raw === null) {
+                return new ActionResult(
+                    success: false,
+                    message: 'messages.security.hosts_permission_denied',
+                    details: [
+                        'paths' => [$hostsPath],
+                        'driver' => $this->getDriverLabel(),
+                    ],
+                );
+            }
+        }
+
+        $entries = $this->inspectHostsFile($raw);
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.security.hosts_section',
+            details: [
+                'entries' => $entries,
+                'count' => count($entries),
+                'paths' => [$hostsPath],
                 'driver' => $this->getDriverLabel(),
             ],
         );
@@ -399,70 +559,16 @@ trait InteractsWithMaintenanceAndSecurity
     }
 
     /**
-     * Calculate byte size of a cache file or directory tree safely.
-     */
-    protected function calculateCacheEntrySize(string $path): float
-    {
-        if (is_link($path)) {
-            return 0.0;
-        }
-
-        if (is_file($path)) {
-            $size = @filesize($path);
-
-            return $size !== false ? (float) $size : 0.0;
-        }
-
-        if (! is_dir($path) || ! is_readable($path)) {
-            return 0.0;
-        }
-
-        $total = 0.0;
-        try {
-            $iterator = new FilesystemIterator($path, FilesystemIterator::SKIP_DOTS);
-            /** @var SplFileInfo $item */
-            foreach ($iterator as $item) {
-                $total += $this->calculateCacheEntrySize($item->getPathname());
-            }
-        } catch (Throwable) {
-            // Ignore unreadable subtrees
-        }
-
-        return $total;
-    }
-
-    /**
-     * Delete a cache file or subdirectory safely.
-     */
-    protected function deleteCacheEntrySafely(string $path): bool
-    {
-        if (is_link($path) || is_file($path)) {
-            return @unlink($path);
-        }
-
-        if (! is_dir($path)) {
-            return false;
-        }
-
-        try {
-            $iterator = new FilesystemIterator($path, FilesystemIterator::SKIP_DOTS);
-            /** @var SplFileInfo $item */
-            foreach ($iterator as $item) {
-                $this->deleteCacheEntrySafely($item->getPathname());
-            }
-        } catch (Throwable) {
-            return false;
-        }
-
-        return @rmdir($path);
-    }
-
-    /**
      * Return default browser cache directories for the active OS driver.
      *
      * @return array<string, string>
      */
     abstract protected function getDefaultBrowserCachePaths(): array;
+
+    /**
+     * Return the filesystem path to the OS hosts file.
+     */
+    abstract protected function getHostsFilePath(): string;
 
     /**
      * Read the raw content of the system hosts file.

@@ -361,7 +361,12 @@ trait InteractsWithNetworkSockets
                 $status = 'DUPLICATE';
                 $icon = '⚠️';
                 $duplicateCount++;
-            } elseif (is_dir($cleanPath)) {
+            } elseif ($this->isUncNetworkPath($cleanPath)) {
+                // Skip SMB/UNC probing to prevent long OS network timeout stalls
+                $status = 'NETWORK_UNC';
+                $icon = '🌐';
+                $seen[$normalizedKey] = true;
+            } elseif ($this->isAccessibleDirectory($cleanPath)) {
                 $status = 'VALID';
                 $icon = '✅';
                 $validCount++;
@@ -399,6 +404,26 @@ trait InteractsWithNetworkSockets
                 'duplicate' => $duplicateCount,
             ],
         ];
+    }
+
+    /**
+     * Detect UNC network share paths (`\\server\share` or `//server/share`) to skip network timeouts.
+     */
+    protected function isUncNetworkPath(string $path): bool
+    {
+        return str_starts_with($path, '\\\\') || str_starts_with($path, '//');
+    }
+
+    /**
+     * Check whether a local path is an existing directory while suppressing warnings and exceptions.
+     */
+    protected function isAccessibleDirectory(string $path): bool
+    {
+        try {
+            return @is_dir($path);
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

@@ -690,3 +690,123 @@ it('finds top N largest files via min-heap while skipping protected directories,
         @rmdir($tempDir);
     }
 });
+
+it('hardens cleanTempFiles, cleanBrowserCaches, getHostsEntries, and auditEnvironmentPath against locked files, unreadable hosts, and UNC paths', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        /** @var array<int, array<int, string>> */
+        public array $commands = [];
+
+        public ?string $hostsOverride = null;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->commands[] = $command;
+
+            return new ProcessResult(0, '');
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return $this->hostsOverride;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+    $isNonRootUnix = PHP_OS_FAMILY !== 'Windows' && (! function_exists('posix_geteuid') || posix_geteuid() !== 0);
+
+    $baseTemp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_hardened_' . uniqid();
+    $tempCleanupDir = $baseTemp . DIRECTORY_SEPARATOR . 'temp_target';
+    $tempSubDir = $tempCleanupDir . DIRECTORY_SEPARATOR . 'sub';
+    $tempLockedSubDir = $tempCleanupDir . DIRECTORY_SEPARATOR . 'locked_sub';
+    $browserCacheDir = $baseTemp . DIRECTORY_SEPARATOR . 'edge_cache';
+    $browserLockedSubDir = $browserCacheDir . DIRECTORY_SEPARATOR . 'locked_data';
+    $validHostsFile = $baseTemp . DIRECTORY_SEPARATOR . 'hosts';
+
+    mkdir($tempSubDir, 0755, true);
+    mkdir($tempLockedSubDir, 0755, true);
+    mkdir($browserLockedSubDir, 0755, true);
+
+    $tempRemovableFile = $tempSubDir . DIRECTORY_SEPARATOR . 'old_log.tmp';
+    $tempLockedFile = $tempLockedSubDir . DIRECTORY_SEPARATOR . 'in_use.tmp';
+    $browserRemovableFile = $browserCacheDir . DIRECTORY_SEPARATOR . 'cache_1.dat';
+    $browserLockedFile = $browserLockedSubDir . DIRECTORY_SEPARATOR . 'data_0.lock';
+
+    file_put_contents($tempRemovableFile, str_repeat('T', 2048));
+    file_put_contents($tempLockedFile, str_repeat('L', 1024));
+    file_put_contents($browserRemovableFile, str_repeat('B', 4096));
+    file_put_contents($browserLockedFile, str_repeat('K', 1024));
+    file_put_contents($validHostsFile, "127.0.0.1 localhost\n10.0.0.5 intranet.corp\n");
+
+    $tempHandle = @fopen($tempLockedFile, 'r+b');
+    $browserHandle = @fopen($browserLockedFile, 'r+b');
+    if ($isNonRootUnix) {
+        @chmod($tempLockedSubDir, 0555);
+        @chmod($browserLockedSubDir, 0555);
+    }
+
+    try {
+        $tempResult = $driver->cleanTempFiles([$tempCleanupDir]);
+        expect($tempResult->success)->toBeTrue()
+            ->and($tempResult->message)->toBe('messages.maintenance.clean_success')
+            ->and($tempResult->details['deleted_files'])->toBeGreaterThanOrEqual(1)
+            ->and(file_exists($tempRemovableFile))->toBeFalse()
+            ->and($executor->commands)->toContain(['ipconfig', '/flushdns']);
+
+        $browserResult = $driver->cleanBrowserCaches([
+            'Microsoft Edge' => $browserCacheDir,
+            'NonExistent Browser' => $baseTemp . DIRECTORY_SEPARATOR . 'missing_browser',
+        ]);
+        expect($browserResult->success)->toBeTrue()
+            ->and($browserResult->details['deleted_files'])->toBeGreaterThanOrEqual(1)
+            ->and(file_exists($browserRemovableFile))->toBeFalse();
+
+        if (PHP_OS_FAMILY === 'Windows' || $isNonRootUnix) {
+            expect($browserResult->details['skipped_locked_files'])->toBeGreaterThanOrEqual(1)
+                ->and($browserResult->message)->toBe('messages.maintenance.browsers_clean_partial');
+        }
+
+        $hostsSuccess = $driver->getHostsEntries($validHostsFile);
+        expect($hostsSuccess->success)->toBeTrue()
+            ->and($hostsSuccess->details['count'])->toBe(2);
+
+        $hostsMissing = $driver->getHostsEntries($baseTemp . DIRECTORY_SEPARATOR . 'missing_hosts');
+        expect($hostsMissing->success)->toBeFalse()
+            ->and($hostsMissing->message)->toBe('messages.security.hosts_permission_denied');
+
+        // Simulate blocked access via ProcessExecutorInterface::readFile returning null
+        $hostsBlockedDefault = $driver->getHostsEntries();
+        expect($hostsBlockedDefault->success)->toBeFalse()
+            ->and($hostsBlockedDefault->message)->toBe('messages.security.hosts_permission_denied');
+
+        $envAudit = $driver->auditEnvironmentPath(sys_get_temp_dir() . ';\\\\offline-server\\share\\tools;C:\\DoesNotExist_999');
+        expect($envAudit['summary']['valid'])->toBe(1)
+            ->and($envAudit['summary']['broken'])->toBe(1)
+            ->and($envAudit['path_entries'][1]['status'])->toBe('NETWORK_UNC');
+    } finally {
+        if (is_resource($tempHandle)) {
+            @fclose($tempHandle);
+        }
+        if (is_resource($browserHandle)) {
+            @fclose($browserHandle);
+        }
+        @chmod($tempLockedSubDir, 0755);
+        @chmod($browserLockedSubDir, 0755);
+        @unlink($tempRemovableFile);
+        @unlink($tempLockedFile);
+        @unlink($browserRemovableFile);
+        @unlink($browserLockedFile);
+        @unlink($validHostsFile);
+        @rmdir($tempLockedSubDir);
+        @rmdir($tempSubDir);
+        @rmdir($tempCleanupDir);
+        @rmdir($browserLockedSubDir);
+        @rmdir($browserCacheDir);
+        @rmdir($baseTemp);
+    }
+});

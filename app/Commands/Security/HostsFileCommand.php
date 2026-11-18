@@ -39,11 +39,27 @@ class HostsFileCommand extends Command
 
         info((string) __('messages.security.hosts_section'));
 
-        /** @var array<int, array{ip: string, host: string, status: string, icon: string}> $entries */
-        $entries = spin(
-            callback: fn (): array => $driver->inspectHostsFile(),
-            message: (string) __('messages.spinners.security_hosts'),
-        );
+        if (method_exists($driver, 'getHostsEntries')) {
+            $hostsResult = spin(
+                callback: fn () => $driver->getHostsEntries(),
+                message: (string) __('messages.spinners.security_hosts'),
+            );
+
+            if (! $hostsResult->success) {
+                return $this->renderActionResult($hostsResult);
+            }
+
+            /** @var array<int, array{ip: string, host: string, status: string, icon: string}> $entries */
+            $entries = is_array($hostsResult->details['entries'] ?? null)
+                ? $hostsResult->details['entries']
+                : [];
+        } else {
+            /** @var array<int, array{ip: string, host: string, status: string, icon: string}> $entries */
+            $entries = spin(
+                callback: fn (): array => $driver->inspectHostsFile(),
+                message: (string) __('messages.spinners.security_hosts'),
+            );
+        }
 
         if ($entries === []) {
             info((string) __('messages.security.no_hosts_entries'));
