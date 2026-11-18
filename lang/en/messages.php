@@ -386,6 +386,7 @@ return [
         'repair_success' => 'OS integrity verification and package audit completed successfully.',
         'repair_failed' => 'OS integrity repair encountered errors or requires elevated privileges.',
         'large_files_section' => 'Top Largest Files Disk Space Analyzer',
+        'invalid_scan_path' => 'Target directory does not exist or cannot be read: :path',
         'no_large_files' => 'No readable files found in the target directory.',
         'large_files_headers' => [
             'size' => 'File Size',

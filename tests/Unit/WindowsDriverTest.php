@@ -611,3 +611,82 @@ it('handles Windows printer test page, default printer, CPU/Disk micro-benchmark
         ->and($bench->details['disk_write_speed'])->toContain('MB/s')
         ->and($bench->details['disk_read_speed'])->toContain('MB/s');
 });
+
+it('finds top N largest files via min-heap while skipping protected directories, symlinks, and missing paths', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            return new ProcessResult(0, '');
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_win_lf_' . uniqid();
+    $subDir = $tempDir . DIRECTORY_SEPARATOR . 'nested';
+    $recycleDir = $tempDir . DIRECTORY_SEPARATOR . '$RECYCLE.BIN';
+    $sysVolDir = $tempDir . DIRECTORY_SEPARATOR . 'System Volume Information';
+    $winSxsDir = $tempDir . DIRECTORY_SEPARATOR . 'Windows' . DIRECTORY_SEPARATOR . 'WinSxS';
+
+    mkdir($subDir, 0777, true);
+    mkdir($recycleDir, 0777, true);
+    mkdir($sysVolDir, 0777, true);
+    mkdir($winSxsDir, 0777, true);
+
+    file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'tiny.bin', str_repeat('a', 100));
+    file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'medium.bin', str_repeat('b', 1500));
+    file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'big1.bin', str_repeat('c', 4096));
+    file_put_contents($subDir . DIRECTORY_SEPARATOR . 'big2.bin', str_repeat('d', 3072));
+    file_put_contents($subDir . DIRECTORY_SEPARATOR . 'small2.bin', str_repeat('e', 200));
+    file_put_contents($recycleDir . DIRECTORY_SEPARATOR . 'ignored_recycle.bin', str_repeat('r', 8192));
+    file_put_contents($sysVolDir . DIRECTORY_SEPARATOR . 'ignored_sysvol.bin', str_repeat('s', 8192));
+    file_put_contents($winSxsDir . DIRECTORY_SEPARATOR . 'ignored_winsxs.bin', str_repeat('w', 8192));
+
+    $symlinkPath = $tempDir . DIRECTORY_SEPARATOR . 'big1_link.bin';
+    $symlinkCreated = @symlink($tempDir . DIRECTORY_SEPARATOR . 'big1.bin', $symlinkPath);
+
+    try {
+        $topTwo = $driver->findLargeFiles($tempDir, 2);
+
+        expect($topTwo)->toHaveCount(2)
+            ->and(basename($topTwo[0]['path']))->toBe('big1.bin')
+            ->and($topTwo[0]['size_bytes'])->toBe(4096.0)
+            ->and(basename($topTwo[1]['path']))->toBe('big2.bin')
+            ->and($topTwo[1]['size_bytes'])->toBe(3072.0)
+            ->and($driver->findLargeFiles($tempDir . DIRECTORY_SEPARATOR . 'does_not_exist', 5))->toBe([]);
+
+        if ($symlinkCreated) {
+            expect(array_map(fn (array $item): string => basename($item['path']), $topTwo))
+                ->not->toContain('big1_link.bin');
+        }
+    } finally {
+        if ($symlinkCreated) {
+            @unlink($symlinkPath);
+        }
+        @unlink($tempDir . DIRECTORY_SEPARATOR . 'tiny.bin');
+        @unlink($tempDir . DIRECTORY_SEPARATOR . 'medium.bin');
+        @unlink($tempDir . DIRECTORY_SEPARATOR . 'big1.bin');
+        @unlink($subDir . DIRECTORY_SEPARATOR . 'big2.bin');
+        @unlink($subDir . DIRECTORY_SEPARATOR . 'small2.bin');
+        @unlink($recycleDir . DIRECTORY_SEPARATOR . 'ignored_recycle.bin');
+        @unlink($sysVolDir . DIRECTORY_SEPARATOR . 'ignored_sysvol.bin');
+        @unlink($winSxsDir . DIRECTORY_SEPARATOR . 'ignored_winsxs.bin');
+        @rmdir($winSxsDir);
+        @rmdir($tempDir . DIRECTORY_SEPARATOR . 'Windows');
+        @rmdir($sysVolDir);
+        @rmdir($recycleDir);
+        @rmdir($subDir);
+        @rmdir($tempDir);
+    }
+});

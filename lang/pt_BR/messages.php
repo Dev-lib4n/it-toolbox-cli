@@ -386,6 +386,7 @@ return [
         'repair_success' => 'Verificação de integridade do SO e auditoria de pacotes concluídas com sucesso.',
         'repair_failed' => 'O reparo de integridade encontrou erros ou requer privilégios elevados.',
         'large_files_section' => 'Analisador de Espaço dos Maiores Arquivos em Disco',
+        'invalid_scan_path' => 'O diretório alvo não existe ou não pode ser lido: :path',
         'no_large_files' => 'Nenhum arquivo legível encontrado no diretório informado.',
         'large_files_headers' => [
             'size' => 'Tamanho',

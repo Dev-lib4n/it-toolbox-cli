@@ -460,3 +460,85 @@ it('handles Linux CUPS test page, default printer, CPU/Disk micro-benchmark, and
         ->and($bench->message)->toBe('messages.toolbox.benchmark_success')
         ->and($bench->details['cpu_score'])->toContain('SHA-256 ops/sec');
 });
+
+it('scans Linux directories with bounded heap and skips symlinks and unreadable paths safely', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            return new ProcessResult(0, '');
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 1000;
+        }
+    };
+
+    $driver = new LinuxDriver($executor);
+
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_lin_lf_' . uniqid();
+    $nestedDir = $tempDir . DIRECTORY_SEPARATOR . 'nested';
+    $gitDir = $tempDir . DIRECTORY_SEPARATOR . '.git';
+    $lockedDir = $tempDir . DIRECTORY_SEPARATOR . 'locked';
+
+    mkdir($nestedDir, 0755, true);
+    mkdir($gitDir, 0755, true);
+    mkdir($lockedDir, 0755, true);
+
+    $isNonRootUnix = PHP_OS_FAMILY !== 'Windows' && (! function_exists('posix_geteuid') || posix_geteuid() !== 0);
+
+    file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'a.log', str_repeat('a', 512));
+    file_put_contents($nestedDir . DIRECTORY_SEPARATOR . 'b.iso', str_repeat('b', 5000));
+    file_put_contents($nestedDir . DIRECTORY_SEPARATOR . 'c.tar', str_repeat('c', 3500));
+    file_put_contents($nestedDir . DIRECTORY_SEPARATOR . 'd.bin', str_repeat('d', 1024));
+    file_put_contents($gitDir . DIRECTORY_SEPARATOR . 'ignored_pack.bin', str_repeat('g', 9000));
+    file_put_contents($lockedDir . DIRECTORY_SEPARATOR . 'secret.bin', str_repeat('l', $isNonRootUnix ? 9000 : 256));
+
+    $symlinkPath = $tempDir . DIRECTORY_SEPARATOR . 'b_alias.iso';
+    $symlinkCreated = @symlink($nestedDir . DIRECTORY_SEPARATOR . 'b.iso', $symlinkPath);
+    $danglingLinkPath = $tempDir . DIRECTORY_SEPARATOR . 'dangling_link.bin';
+    $danglingCreated = @symlink($tempDir . DIRECTORY_SEPARATOR . 'missing_target.bin', $danglingLinkPath);
+    if ($isNonRootUnix) {
+        @chmod($lockedDir, 0000);
+    }
+
+    try {
+        $topTwo = $driver->findLargeFiles($tempDir, 2);
+
+        expect($topTwo)->toHaveCount(2)
+            ->and(basename($topTwo[0]['path']))->toBe('b.iso')
+            ->and($topTwo[0]['size_bytes'])->toBe(5000.0)
+            ->and(basename($topTwo[1]['path']))->toBe('c.tar')
+            ->and($topTwo[1]['size_bytes'])->toBe(3500.0)
+            ->and($driver->findLargeFiles($tempDir . DIRECTORY_SEPARATOR . 'missing_dir', 3))->toBe([]);
+
+        if ($symlinkCreated) {
+            expect(array_map(fn (array $item): string => basename($item['path']), $topTwo))
+                ->not->toContain('b_alias.iso');
+        }
+    } finally {
+        @chmod($lockedDir, 0755);
+        if ($symlinkCreated) {
+            @unlink($symlinkPath);
+        }
+        if ($danglingCreated) {
+            @unlink($danglingLinkPath);
+        }
+        @unlink($tempDir . DIRECTORY_SEPARATOR . 'a.log');
+        @unlink($nestedDir . DIRECTORY_SEPARATOR . 'b.iso');
+        @unlink($nestedDir . DIRECTORY_SEPARATOR . 'c.tar');
+        @unlink($nestedDir . DIRECTORY_SEPARATOR . 'd.bin');
+        @unlink($gitDir . DIRECTORY_SEPARATOR . 'ignored_pack.bin');
+        @unlink($lockedDir . DIRECTORY_SEPARATOR . 'secret.bin');
+        @rmdir($lockedDir);
+        @rmdir($gitDir);
+        @rmdir($nestedDir);
+        @rmdir($tempDir);
+    }
+});

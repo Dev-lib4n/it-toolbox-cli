@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace App\Drivers\Concerns;
 
 use App\DTOs\ActionResult;
-use FilesystemIterator;
+use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SplFileInfo;
+use SplMinHeap;
 use Throwable;
 
 trait InteractsWithMaintenanceAndSecurity
@@ -42,7 +43,8 @@ trait InteractsWithMaintenanceAndSecurity
     ];
 
     /**
-     * Scan a target directory recursively and return the largest files sorted by size descending.
+     * Scan a target directory recursively using a fixed-size SplMinHeap and junction/permission guards,
+     * returning the top N largest readable files sorted by size descending without buffering all paths in memory.
      *
      * @return array<int, array{path: string, size_bytes: float, size_formatted: string, modified_at: string}>
      */
@@ -53,69 +55,141 @@ trait InteractsWithMaintenanceAndSecurity
             ? trim($directory)
             : (string) (getenv('USERPROFILE') ?: getenv('HOME') ?: (getcwd() ?: base_path()));
 
-        if (! is_dir($targetDir) || ! is_readable($targetDir)) {
+        if ($targetDir === '' || ! is_dir($targetDir) || ! is_readable($targetDir)) {
             return [];
         }
 
-        $collected = [];
+        $heap = new class extends SplMinHeap
+        {
+            /**
+             * Keep the smallest file entry at top() for O(1) threshold checks and O(log N) eviction.
+             *
+             * @param  array{path: string, size_bytes: float, size_formatted: string, modified_at: string}  $value1
+             * @param  array{path: string, size_bytes: float, size_formatted: string, modified_at: string}  $value2
+             */
+            protected function compare(mixed $value1, mixed $value2): int
+            {
+                return $value2['size_bytes'] <=> $value1['size_bytes'];
+            }
+        };
 
         try {
             $dirIterator = new RecursiveDirectoryIterator(
                 $targetDir,
-                FilesystemIterator::SKIP_DOTS | FilesystemIterator::CURRENT_AS_FILEINFO
+                RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::CURRENT_AS_FILEINFO
             );
 
-            $filterIterator = new \RecursiveCallbackFilterIterator(
+            $filterIterator = new RecursiveCallbackFilterIterator(
                 $dirIterator,
                 function (SplFileInfo $current): bool {
-                    if ($current->isLink()) {
+                    try {
+                        if ($current->isLink()) {
+                            return false;
+                        }
+
+                        $pathname = $current->getPathname();
+                        if (@readlink($pathname) !== false) {
+                            return false;
+                        }
+
+                        if ($this->shouldSkipScanPath($pathname)) {
+                            return false;
+                        }
+
+                        if ($current->isDir()) {
+                            if (! @is_readable($pathname)) {
+                                return false;
+                            }
+
+                            $lowerName = strtolower($current->getFilename());
+
+                            return ! in_array($lowerName, self::IGNORED_SCAN_DIRS, true);
+                        }
+
+                        return true;
+                    } catch (Throwable) {
                         return false;
                     }
-                    if ($current->isDir()) {
-                        $lowerName = strtolower($current->getFilename());
-
-                        return ! in_array($lowerName, self::IGNORED_SCAN_DIRS, true);
-                    }
-
-                    return true;
                 }
             );
 
             $iterator = new RecursiveIteratorIterator(
                 $filterIterator,
-                RecursiveIteratorIterator::LEAVES_ONLY,
+                RecursiveIteratorIterator::SELF_FIRST,
                 RecursiveIteratorIterator::CATCH_GET_CHILD
             );
 
             /** @var SplFileInfo $file */
             foreach ($iterator as $file) {
-                if (! $file->isFile() || $file->isLink()) {
+                try {
+                    if ($file->isLink() || ! $file->isFile()) {
+                        continue;
+                    }
+
+                    $pathname = $file->getPathname();
+                    if (@readlink($pathname) !== false) {
+                        continue;
+                    }
+
+                    $rawSize = @$file->getSize();
+                    if ($rawSize === false || $rawSize <= 0) {
+                        continue;
+                    }
+
+                    $sizeBytes = (float) $rawSize;
+                    if ($heap->count() >= $safeLimit) {
+                        /** @var array{path: string, size_bytes: float, size_formatted: string, modified_at: string} $smallest */
+                        $smallest = $heap->top();
+                        if ($sizeBytes <= $smallest['size_bytes']) {
+                            continue;
+                        }
+                        $heap->extract();
+                    }
+
+                    $mtime = @$file->getMTime();
+                    $heap->insert([
+                        'path' => $pathname,
+                        'size_bytes' => $sizeBytes,
+                        'size_formatted' => $this->formatBytes($sizeBytes),
+                        'modified_at' => $mtime !== false ? date('Y-m-d H:i', $mtime) : '-',
+                    ]);
+                } catch (Throwable) {
                     continue;
                 }
-
-                $size = @$file->getSize();
-                if ($size === false || $size <= 0) {
-                    continue;
-                }
-
-                $mtime = @$file->getMTime();
-                $collected[] = [
-                    'path' => $file->getPathname(),
-                    'size_bytes' => (float) $size,
-                    'size_formatted' => $this->formatBytes((float) $size),
-                    'modified_at' => $mtime !== false ? date('Y-m-d H:i', $mtime) : '-',
-                ];
             }
         } catch (Throwable) {
-            // Ignore unreadable permission boundaries
+            // Gracefully return partial top-N results collected before any root permission boundary
+        }
+
+        $topFiles = [];
+        while (! $heap->isEmpty()) {
+            $topFiles[] = $heap->extract();
         }
 
         usort(
-            $collected,
-            fn (array $a, array $b): int => $b['size_bytes'] <=> $a['size_bytes']
+            $topFiles,
+            fn (array $a, array $b): int => ($b['size_bytes'] <=> $a['size_bytes']) ?: ($a['path'] <=> $b['path'])
         );
 
-        return array_slice($collected, 0, $safeLimit);
+        return $topFiles;
+    }
+
+    /**
+     * Check whether a normalized filesystem path belongs to protected or virtual OS directories.
+     */
+    protected function shouldSkipScanPath(string $pathname): bool
+    {
+        $normalized = strtolower(str_replace('\\', '/', $pathname));
+
+        foreach (['/proc', '/sys', '/dev', '/run'] as $virtualRoot) {
+            if ($normalized === $virtualRoot || str_starts_with($normalized, $virtualRoot . '/')) {
+                return true;
+            }
+        }
+
+        return str_contains($normalized, 'windows/winsxs')
+            || str_contains($normalized, '$recycle.bin')
+            || str_contains($normalized, 'system volume information');
     }
 
     /**

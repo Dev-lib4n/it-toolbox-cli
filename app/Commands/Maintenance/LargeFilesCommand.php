@@ -7,7 +7,9 @@ namespace App\Commands\Maintenance;
 use App\Commands\Concerns\InteractsWithLocale;
 use App\Contracts\SystemDriverInterface;
 use LaravelZero\Framework\Commands\Command;
+use Throwable;
 
+use function Laravel\Prompts\error;
 use function Laravel\Prompts\info;
 use function Laravel\Prompts\spin;
 use function Laravel\Prompts\table;
@@ -47,11 +49,28 @@ class LargeFilesCommand extends Command
         $targetPath = is_string($pathArg) && trim($pathArg) !== '' ? trim($pathArg) : null;
         $limit = max(1, (int) $this->option('limit'));
 
-        /** @var array<int, array{path: string, size_bytes: float, size_formatted: string, modified_at: string}> $files */
-        $files = spin(
-            callback: fn (): array => $driver->findLargeFiles($targetPath, $limit),
-            message: (string) __('messages.spinners.maintenance_large_files'),
-        );
+        $resolvedPath = $targetPath ?? (string) (getenv('USERPROFILE') ?: getenv('HOME') ?: (getcwd() ?: base_path()));
+        if ($resolvedPath === '' || ! is_dir($resolvedPath) || ! is_readable($resolvedPath)) {
+            error((string) __('messages.maintenance.invalid_scan_path', [
+                'path' => $resolvedPath !== '' ? $resolvedPath : '(empty)',
+            ]));
+
+            return self::FAILURE;
+        }
+
+        try {
+            /** @var array<int, array{path: string, size_bytes: float, size_formatted: string, modified_at: string}> $files */
+            $files = spin(
+                callback: fn (): array => $driver->findLargeFiles($targetPath, $limit),
+                message: (string) __('messages.spinners.maintenance_large_files'),
+            );
+        } catch (Throwable $exception) {
+            error((string) __('messages.common.unexpected_error', [
+                'error' => $exception->getMessage(),
+            ]));
+
+            return self::FAILURE;
+        }
 
         if ($files === []) {
             warning((string) __('messages.maintenance.no_large_files'));
