@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Commands\ToolboxMenuCommand;
 use Illuminate\Contracts\Console\Kernel;
+use Symfony\Component\Console\Command\Command;
 
 it('verifies every subcommand referenced in ToolboxMenuCommand is registered in the Laravel Zero Kernel', function (): void {
     /** @var Kernel $kernel */
@@ -15,15 +16,14 @@ it('verifies every subcommand referenced in ToolboxMenuCommand is registered in 
     expect($menuCommands)->not->toBeEmpty();
 
     foreach ($menuCommands as $commandName) {
-        expect($registeredCommands)->toHaveKey(
-            $commandName,
-            sprintf('Menu references unregistered command "%s".', $commandName)
-        );
+        $name = $commandName instanceof Command
+            ? (string) $commandName->getName()
+            : (string) $commandName;
 
-        $definition = $registeredCommands[$commandName]->getDefinition();
-        expect($definition->hasOption('lang'))->toBeTrue(
-            sprintf('Command "%s" must accept --lang option when invoked from ToolboxMenuCommand.', $commandName)
-        );
+        expect($registeredCommands)->toHaveKey($name);
+
+        $definition = $registeredCommands[$name]->getDefinition();
+        expect($definition->hasOption('lang'))->toBeTrue();
     }
 });
 
@@ -31,7 +31,10 @@ it('ensures every App\\Commands subcommand is exposed in ToolboxMenuCommand with
     /** @var Kernel $kernel */
     $kernel = $this->app->make(Kernel::class);
     $registeredCommands = $kernel->all();
-    $menuCommands = ToolboxMenuCommand::getAllMenuCommands();
+    $menuCommands = array_map(
+        fn ($cmd): string => $cmd instanceof Command ? (string) $cmd->getName() : (string) $cmd,
+        ToolboxMenuCommand::getAllMenuCommands()
+    );
 
     $appCommands = [];
     foreach ($registeredCommands as $name => $commandInstance) {
@@ -55,12 +58,12 @@ it('verifies all submenu label translation keys exist in both en and pt_BR', fun
         app()->setLocale($locale);
         app('translator')->setLocale($locale);
 
-        foreach ($submenus as $category => $items) {
-            expect($items)->not->toBeEmpty("Submenu '{$category}' must not be empty");
+        foreach ($submenus as $items) {
+            expect($items)->not->toBeEmpty();
 
-            foreach ($items as $key => $entry) {
+            foreach ($items as $entry) {
                 $translated = (string) __($entry['label_key']);
-                expect($translated)->not->toBe($entry['label_key'], "Missing translation '{$entry['label_key']}' for locale '{$locale}'")
+                expect($translated)->not->toBe($entry['label_key'])
                     ->and($translated)->not->toBeEmpty();
             }
         }
