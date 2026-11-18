@@ -182,10 +182,8 @@ return [
         'section' => 'Exportação de Relatório de Diagnóstico',
         'format_prompt' => 'Selecione o formato de exportação do relatório de diagnóstico:',
         'formats' => [
-            'both' => 'Markdown & JSON (.md + .json)',
-            'md' => 'Documento Markdown (.md)',
-            'json' => 'Documento JSON (.json)',
             'txt' => 'Texto Puro (.txt)',
+            'json' => 'Documento JSON (.json)',
         ],
         'exported_success' => 'Relatório de diagnóstico exportado com sucesso em: :path',
         'exported_failed' => 'Falha ao gravar o relatório de diagnóstico em disco: :path',

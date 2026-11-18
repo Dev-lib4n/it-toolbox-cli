@@ -182,10 +182,8 @@ return [
         'section' => 'Diagnostic Report Export',
         'format_prompt' => 'Select the export format for the diagnostic report:',
         'formats' => [
-            'both' => 'Markdown & JSON (.md + .json)',
-            'md' => 'Markdown Document (.md)',
-            'json' => 'JSON Document (.json)',
             'txt' => 'Plain Text (.txt)',
+            'json' => 'JSON Document (.json)',
         ],
         'exported_success' => 'Diagnostic report exported successfully to: :path',
         'exported_failed' => 'Failed to write diagnostic report to disk: :path',

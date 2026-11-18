@@ -4,19 +4,18 @@ declare(strict_types=1);
 
 namespace App\Drivers;
 
-use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\ProcessRunnerInterface;
 use App\Contracts\SystemDriverInterface;
 use App\DTOs\ActionResult;
 use App\DTOs\ProcessResult;
-use App\Services\SymfonyProcessExecutor;
+use App\Services\SymfonyProcessRunner;
 
 class WindowsDriver implements SystemDriverInterface
 {
     private const UTF8_PREAMBLE = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; ';
 
     public function __construct(
-        private readonly ProcessExecutorInterface|ProcessRunnerInterface $processRunner = new SymfonyProcessExecutor(),
+        private readonly ProcessRunnerInterface $processRunner = new SymfonyProcessRunner(),
     ) {}
 
     /**

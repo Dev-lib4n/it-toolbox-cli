@@ -4,7 +4,6 @@
 .phpunit.cache/
 composer.lock
 it-toolbox-report-*.txt
-it-toolbox-report-*.md
 it-toolbox-report-*.json
 .DS_Store
 Thumbs.db
