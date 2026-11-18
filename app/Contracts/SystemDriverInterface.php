@@ -96,6 +96,54 @@ interface SystemDriverInterface
     public function getListeningPorts(): array;
 
     /**
+     * Probe a remote TCP host and port and measure connection latency in milliseconds.
+     *
+     * @param  string  $host
+     * @param  int  $port
+     * @param  int  $timeout
+     * @return array{host: string, port: int, status: string, latency: string, error: string}
+     */
+    public function probePort(string $host, int $port, int $timeout = 3): array;
+
+    /**
+     * Retrieve wireless (Wi-Fi) adapter connection metrics (SSID, BSSID, Signal, Channel, Band, Rates).
+     *
+     * @return ActionResult
+     */
+    public function getWifiInfo(): ActionResult;
+
+    /**
+     * Perform a complete network stack reset (Winsock/IP reset on Windows; NetworkManager/DHCP on Linux).
+     *
+     * @return ActionResult
+     */
+    public function resetNetworkStack(): ActionResult;
+
+    /**
+     * Inspect an HTTPS domain's SSL/TLS certificate (CN, Issuer, Validity dates, Days remaining, SANs).
+     *
+     * @param  string  $domain
+     * @param  int  $port
+     * @param  int  $timeout
+     * @return ActionResult
+     */
+    public function checkSslCertificate(string $domain, int $port = 443, int $timeout = 5): ActionResult;
+
+    /**
+     * Discover active devices on the local area network (ARP cache + local subnet discovery).
+     *
+     * @return array<int, array{ip: string, mac: string, status: string, interface: string}>
+     */
+    public function scanLanDevices(): array;
+
+    /**
+     * Retrieve external public IP address, geolocation, ISP/ASN, and reverse hostname.
+     *
+     * @return ActionResult
+     */
+    public function getPublicIpInfo(): ActionResult;
+
+    /**
      * Clean system and user temporary directories safely.
      *
      * @return ActionResult

@@ -117,6 +117,36 @@ it('generates localized Markdown (.md) and JSON (.json) diagnostic reports via R
             return [];
         }
 
+        public function probePort(string $host, int $port, int $timeout = 3): array
+        {
+            return ['host' => $host, 'port' => $port, 'status' => 'OPEN', 'latency' => '1.00 ms', 'error' => '-'];
+        }
+
+        public function getWifiInfo(): ActionResult
+        {
+            return new ActionResult(false, 'messages.network.no_wifi');
+        }
+
+        public function resetNetworkStack(): ActionResult
+        {
+            return new ActionResult(true, 'messages.network.reset_success');
+        }
+
+        public function checkSslCertificate(string $domain, int $port = 443, int $timeout = 5): ActionResult
+        {
+            return new ActionResult(true, 'messages.network.ssl_valid_success');
+        }
+
+        public function scanLanDevices(): array
+        {
+            return [];
+        }
+
+        public function getPublicIpInfo(): ActionResult
+        {
+            return new ActionResult(true, 'messages.network.public_ip_success');
+        }
+
         public function cleanTempFiles(): ActionResult
         {
             return new ActionResult(true, 'messages.maintenance.clean_success');

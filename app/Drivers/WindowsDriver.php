@@ -6,12 +6,15 @@ namespace App\Drivers;
 
 use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\SystemDriverInterface;
+use App\Drivers\Concerns\InteractsWithNetworkSockets;
 use App\DTOs\ActionResult;
 use App\DTOs\ProcessResult;
 use App\Services\SymfonyProcessExecutor;
 
 class WindowsDriver implements SystemDriverInterface
 {
+    use InteractsWithNetworkSockets;
+
     private const UTF8_PREAMBLE = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; ';
 
     public function __construct(
@@ -681,6 +684,162 @@ PS;
         }
 
         return $ports;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getWifiInfo(): ActionResult
+    {
+        $result = $this->runPowerShell('netsh wlan show interfaces');
+        $output = trim($result->output);
+
+        if (! $result->successful || $output === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.network.no_wifi',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $lower = strtolower($output);
+        if (str_contains($lower, 'no wireless interface')
+            || str_contains($lower, 'não há interface sem fio')
+            || str_contains($lower, 'is not running')
+            || str_contains($lower, 'não está em execução')) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.network.no_wifi',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $fields = [];
+        $lines = preg_split('/\r\n|\r|\n/', $output) ?: [];
+        foreach ($lines as $line) {
+            if (preg_match('/^\s*([^:]+?)\s*:\s*(.+)$/', $line, $matches) === 1) {
+                $key = strtolower(trim($matches[1]));
+                $val = trim($matches[2]);
+                $fields[$key] = $val;
+            }
+        }
+
+        $ssid = $fields['ssid'] ?? '';
+        $interface = $fields['name'] ?? $fields['nome'] ?? 'Wi-Fi';
+        $state = $fields['state'] ?? $fields['estado'] ?? 'disconnected';
+
+        if ($ssid === '' && ! isset($fields['name']) && ! isset($fields['nome'])) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.network.no_wifi',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $rxRate = $fields['receive rate (mbps)'] ?? $fields['taxa de recepção (mbps)'] ?? '-';
+        $txRate = $fields['transmit rate (mbps)'] ?? $fields['taxa de transmissão (mbps)'] ?? '-';
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.network.wifi_fetched_success',
+            details: [
+                'interface' => $interface,
+                'state' => $state,
+                'ssid' => $ssid !== '' ? $ssid : '-',
+                'bssid' => $fields['bssid'] ?? '-',
+                'signal' => $fields['signal'] ?? $fields['sinal'] ?? '-',
+                'channel' => $fields['channel'] ?? $fields['canal'] ?? '-',
+                'band' => $fields['band'] ?? $fields['banda'] ?? $fields['radio type'] ?? $fields['tipo de rádio'] ?? '-',
+                'rx_rate' => $rxRate !== '-' && ! str_contains(strtolower($rxRate), 'mbps') ? $rxRate . ' Mbps' : $rxRate,
+                'tx_rate' => $txRate !== '-' && ! str_contains(strtolower($txRate), 'mbps') ? $txRate . ' Mbps' : $txRate,
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function resetNetworkStack(): ActionResult
+    {
+        $adminCheck = $this->processRunner->run(['net', 'session'], 5);
+        if (! $adminCheck->successful) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.common.permission_denied',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $steps = [
+            ['cmd' => ['ipconfig', '/release'], 'label' => 'ipconfig /release'],
+            ['cmd' => ['ipconfig', '/flushdns'], 'label' => 'ipconfig /flushdns'],
+            ['cmd' => ['netsh', 'winsock', 'reset'], 'label' => 'netsh winsock reset'],
+            ['cmd' => ['netsh', 'int', 'ip', 'reset'], 'label' => 'netsh int ip reset'],
+            ['cmd' => ['ipconfig', '/renew'], 'label' => 'ipconfig /renew'],
+        ];
+
+        $executed = [];
+        foreach ($steps as $step) {
+            $this->processRunner->run($step['cmd'], 30);
+            $executed[] = $step['label'];
+        }
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.network.reset_success',
+            details: [
+                'commands_executed' => $executed,
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function scanLanDevices(): array
+    {
+        $arpResult = $this->processRunner->run(['arp', '-a']);
+        if (! $arpResult->successful || $arpResult->output === '') {
+            return [];
+        }
+
+        $devices = [];
+        $currentInterface = 'LAN';
+        $lines = preg_split('/\r\n|\r|\n/', $arpResult->output) ?: [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            if (preg_match('/^Interface:\s+([0-9.]+)/i', $line, $ifaceMatch) === 1) {
+                $currentInterface = $ifaceMatch[1];
+
+                continue;
+            }
+
+            if (preg_match('/^([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s+([0-9a-fA-F:-]{17})\s+(\S+)/', $line, $entryMatch) === 1) {
+                $ip = $entryMatch[1];
+                $mac = strtoupper(str_replace('-', ':', $entryMatch[2]));
+                $type = ucfirst(strtolower($entryMatch[3]));
+
+                if (! $this->isUnicastLanNeighbor($ip, $mac)) {
+                    continue;
+                }
+
+                $devices[] = [
+                    'ip' => $ip,
+                    'mac' => $mac,
+                    'status' => $type,
+                    'interface' => $currentInterface,
+                ];
+            }
+        }
+
+        return $devices;
     }
 
     /**

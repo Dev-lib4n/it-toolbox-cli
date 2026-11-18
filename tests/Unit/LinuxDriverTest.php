@@ -144,3 +144,65 @@ it('parses Linux critical logs from journalctl JSON and falls back to syslog/emp
         ->and($emptyResult->details['count'])->toBe(0)
         ->and($emptyResult->details['events'])->toBeEmpty();
 });
+
+it('parses Linux nmcli Wi-Fi metrics, ip neigh LAN devices, and executes network stack reset as root', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $uid = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            return match ($command) {
+                ['nmcli', '-t', '-f', 'ACTIVE,SSID,BSSID,CHAN,FREQ,RATE,SIGNAL', 'dev', 'wifi'] => new ProcessResult(
+                    0,
+                    "no:GuestNet:11\\:22\\:33\\:44\\:55\\:66:6:2437 MHz:130 Mbit/s:55\nyes:Office-WiFi6:AA\\:BB\\:CC\\:DD\\:EE\\:FF:44:5220 MHz:540 Mbit/s:88"
+                ),
+                ['systemctl', 'restart', 'NetworkManager'] => new ProcessResult(0, ''),
+                ['which', 'dhclient'] => new ProcessResult(0, '/usr/sbin/dhclient'),
+                ['dhclient', '-r'] => new ProcessResult(0, ''),
+                ['dhclient'] => new ProcessResult(0, ''),
+                ['ip', 'neigh', 'show'] => new ProcessResult(0, implode("\n", [
+                    '192.168.1.1 dev eth0 lladdr 00:1a:2b:3c:4d:5e REACHABLE',
+                    '192.168.1.25 dev eth0 lladdr 10:20:30:40:50:60 STALE',
+                    '192.168.1.99 dev eth0 FAILED',
+                ])),
+                default => new ProcessResult(1, '', 'Command failed', false),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return $this->uid;
+        }
+    };
+
+    $driver = new LinuxDriver($executor);
+
+    $wifi = $driver->getWifiInfo();
+    expect($wifi->success)->toBeTrue()
+        ->and($wifi->details['ssid'])->toBe('Office-WiFi6')
+        ->and($wifi->details['bssid'])->toBe('AA:BB:CC:DD:EE:FF')
+        ->and($wifi->details['signal'])->toBe('88%')
+        ->and($wifi->details['channel'])->toBe('44');
+
+    $resetRoot = $driver->resetNetworkStack();
+    expect($resetRoot->success)->toBeTrue()
+        ->and($resetRoot->details['commands_executed'])->toContain('systemctl restart NetworkManager', 'dhclient -r && dhclient');
+
+    $executor->uid = 1000;
+    $resetNonRoot = $driver->resetNetworkStack();
+    expect($resetNonRoot->success)->toBeFalse()
+        ->and($resetNonRoot->message)->toBe('messages.common.permission_denied');
+
+    $neighbors = $driver->scanLanDevices();
+    expect($neighbors)->toHaveCount(2)
+        ->and($neighbors[0]['ip'])->toBe('192.168.1.1')
+        ->and($neighbors[0]['mac'])->toBe('00:1A:2B:3C:4D:5E')
+        ->and($neighbors[0]['status'])->toBe('REACHABLE')
+        ->and($neighbors[1]['ip'])->toBe('192.168.1.25');
+});
