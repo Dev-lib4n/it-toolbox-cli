@@ -79,20 +79,9 @@ jobs:
       - name: Package Standalone Native Binaries (Zero-Dependency)
         run: |
           set -euo pipefail
-
-          # Strip leading Unix shebang (#!/usr/bin/env php) if present before concatenating with micro.sfx
-          if head -c 2 builds/it-toolbox | grep -q '#!'; then
-            tail -n +2 builds/it-toolbox > builds/it-toolbox.clean.phar
-          else
-            cp builds/it-toolbox builds/it-toolbox.clean.phar
-          fi
-
-          cat micro-linux.sfx builds/it-toolbox.clean.phar > builds/it-toolbox-linux-x64
-          chmod +x builds/it-toolbox-linux-x64
-
-          cat micro-windows.sfx builds/it-toolbox.clean.phar > builds/it-toolbox-windows-x64.exe
-
-          rm -f builds/it-toolbox.clean.phar micro-linux.sfx micro-windows.sfx
+          php scripts/combine-micro.php micro-linux.sfx builds/it-toolbox builds/it-toolbox-linux-x64
+          php scripts/combine-micro.php micro-windows.sfx builds/it-toolbox builds/it-toolbox-windows-x64.exe
+          rm -f micro-linux.sfx micro-windows.sfx
           ls -lh builds/
 
       - name: Smoke Test Linux Standalone Binary

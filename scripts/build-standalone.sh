@@ -40,17 +40,9 @@ curl -fL --retry 3 -o "${CACHE_DIR}/micro-win.zip" "${WIN_URL}"
 unzip -q -o "${CACHE_DIR}/micro-win.zip" -d "${CACHE_DIR}"
 mv "${CACHE_DIR}/micro.sfx" "${CACHE_DIR}/micro-windows.sfx"
 
-echo "==> [3/4] Concatenating micro.sfx + PHAR into native executables..."
-if head -c 2 "${PHAR_FILE}" | grep -q '#!'; then
-    tail -n +2 "${PHAR_FILE}" > "${CACHE_DIR}/it-toolbox.clean.phar"
-else
-    cp "${PHAR_FILE}" "${CACHE_DIR}/it-toolbox.clean.phar"
-fi
-
-cat "${CACHE_DIR}/micro-linux.sfx" "${CACHE_DIR}/it-toolbox.clean.phar" > "${BUILD_DIR}/it-toolbox-linux-x64"
-chmod +x "${BUILD_DIR}/it-toolbox-linux-x64"
-
-cat "${CACHE_DIR}/micro-windows.sfx" "${CACHE_DIR}/it-toolbox.clean.phar" > "${BUILD_DIR}/it-toolbox-windows-x64.exe"
+echo "==> [3/4] Combining micro.sfx + PHAR with SHA512 signature recalculation..."
+php scripts/combine-micro.php "${CACHE_DIR}/micro-linux.sfx" "${PHAR_FILE}" "${BUILD_DIR}/it-toolbox-linux-x64"
+php scripts/combine-micro.php "${CACHE_DIR}/micro-windows.sfx" "${PHAR_FILE}" "${BUILD_DIR}/it-toolbox-windows-x64.exe"
 
 echo "==> [4/4] Cleaning temporary build cache..."
 rm -rf "${CACHE_DIR}"
