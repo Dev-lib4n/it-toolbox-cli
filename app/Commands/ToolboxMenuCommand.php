@@ -45,12 +45,14 @@ class ToolboxMenuCommand extends Command
             $choice = $this->promptNumericMenu(
                 promptLabel: (string) __('messages.menu.main_prompt'),
                 options: [
-                    '1' => (string) __('messages.menu.categories.system'),
-                    '2' => (string) __('messages.menu.categories.printers'),
-                    '3' => (string) __('messages.menu.categories.network'),
-                    '4' => (string) __('messages.menu.categories.maintenance'),
-                    '5' => (string) __('messages.menu.categories.reports'),
-                    '6' => (string) __('messages.menu.categories.language'),
+                    '1' => (string) __('messages.menu.categories.health_check'),
+                    '2' => (string) __('messages.menu.categories.system'),
+                    '3' => (string) __('messages.menu.categories.printers'),
+                    '4' => (string) __('messages.menu.categories.network'),
+                    '5' => (string) __('messages.menu.categories.maintenance'),
+                    '6' => (string) __('messages.menu.categories.reports'),
+                    '7' => (string) __('messages.menu.categories.self_update'),
+                    '8' => (string) __('messages.menu.categories.language'),
                     '0' => (string) __('messages.menu.exit'),
                 ],
                 defaultKey: '1',
@@ -63,16 +65,20 @@ class ToolboxMenuCommand extends Command
                 return self::SUCCESS;
             }
 
-            if ($choice === '5') {
-                $this->executeSubcommand('report:export', $locale);
+            if ($choice === '1') {
+                $this->executeSubcommand('health:check', $locale);
             } elseif ($choice === '6') {
+                $this->executeSubcommand('report:export', $locale);
+            } elseif ($choice === '7') {
+                $this->executeSubcommand('self:update', $locale);
+            } elseif ($choice === '8') {
                 $locale = $this->promptNumericLanguageSwitch($locale);
             } else {
                 $category = match ($choice) {
-                    '1' => 'system',
-                    '2' => 'printers',
-                    '3' => 'network',
-                    '4' => 'maintenance',
+                    '2' => 'system',
+                    '3' => 'printers',
+                    '4' => 'network',
+                    '5' => 'maintenance',
                     default => 'system',
                 };
 
@@ -153,6 +159,7 @@ class ToolboxMenuCommand extends Command
                 'system' => [
                     '1' => ['label' => (string) __('messages.menu.actions.system_info'), 'command' => 'system:info'],
                     '2' => ['label' => (string) __('messages.menu.actions.system_top'), 'command' => 'system:top'],
+                    '3' => ['label' => (string) __('messages.menu.actions.system_logs'), 'command' => 'system:logs'],
                 ],
                 'printers' => [
                     '1' => ['label' => (string) __('messages.menu.actions.printer_list'), 'command' => 'printer:list'],
