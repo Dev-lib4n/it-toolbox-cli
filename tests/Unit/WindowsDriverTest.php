@@ -525,3 +525,89 @@ it('executes Windows OS repair, pending updates, scheduled tasks, security audit
         @rmdir($tempDir);
     }
 });
+
+it('handles Windows printer test page, default printer, CPU/Disk micro-benchmark, and hardware asset inventory', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $callIndex = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->callIndex++;
+
+            return match ($this->callIndex) {
+                1 => new ProcessResult(0, (string) json_encode(['Success' => true, 'ReturnValue' => 0, 'Error' => ''])),
+                2 => new ProcessResult(0, (string) json_encode(['Success' => true, 'ReturnValue' => 0, 'Error' => ''])),
+                3 => new ProcessResult(0, (string) json_encode([
+                    'Hostname' => 'ASSET-WS-042',
+                    'Manufacturer' => 'Dell Inc.',
+                    'Model' => 'OptiPlex 7010',
+                    'SerialNumber' => 'SN-99887766',
+                    'BiosVersion' => '1.18.0',
+                    'Motherboard' => 'Dell Inc. 0X88Y',
+                    'OsName' => 'Microsoft Windows 11 Pro',
+                    'OsBuild' => '10.0.22631 (Build 22631)',
+                    'CpuModel' => 'Intel(R) Core(TM) i7-13700',
+                    'CpuCores' => '16 Cores / 24 Threads',
+                    'TotalRamBytes' => 34359738368, // 32 GB
+                    'RamModules' => '16.0GB @ 4800MHz, 16.0GB @ 4800MHz',
+                    'Disks' => [
+                        [
+                            'Model' => 'Samsung PM9A1 NVMe 512GB',
+                            'Size' => 512110190592,
+                            'MediaType' => 'SSD',
+                            'BusType' => 'NVMe',
+                        ],
+                    ],
+                ])),
+                4 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'InterfaceAlias' => 'Ethernet',
+                        'IPv4' => '10.0.10.42',
+                        'IPv6' => '',
+                        'Gateway' => '10.0.10.1',
+                        'DnsServers' => '10.0.10.2',
+                        'MacAddress' => '00-1A-2B-3C-4D-5E',
+                        'Status' => 'Up',
+                    ],
+                ])),
+                default => new ProcessResult(0, '[]'),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $testPage = $driver->printTestPage('HP LaserJet M428');
+    expect($testPage->success)->toBeTrue()
+        ->and($testPage->message)->toBe('messages.printer.test_page_success');
+
+    $defaultSet = $driver->setDefaultPrinter('HP LaserJet M428');
+    expect($defaultSet->success)->toBeTrue()
+        ->and($defaultSet->message)->toBe('messages.printer.default_set_success');
+
+    $inventory = $driver->getHardwareInventory();
+    expect($inventory['system_identity']['hostname'])->toBe('ASSET-WS-042')
+        ->and($inventory['system_identity']['serial_number'])->toBe('SN-99887766')
+        ->and($inventory['processor_memory']['ram_total'])->toBe('32.00 GB')
+        ->and($inventory['physical_disks'])->toHaveCount(1)
+        ->and($inventory['physical_disks'][0]['bus_type'])->toBe('NVMe')
+        ->and($inventory['network_adapters'][0]['mac'])->toBe('00-1A-2B-3C-4D-5E');
+
+    $bench = $driver->runSystemBenchmark(1, 0.05);
+    expect($bench->success)->toBeTrue()
+        ->and($bench->message)->toBe('messages.toolbox.benchmark_success')
+        ->and($bench->details['cpu_score'])->toContain('SHA-256 ops/sec')
+        ->and($bench->details['disk_write_speed'])->toContain('MB/s')
+        ->and($bench->details['disk_read_speed'])->toContain('MB/s');
+});

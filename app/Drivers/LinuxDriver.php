@@ -1675,6 +1675,178 @@ class LinuxDriver implements SystemDriverInterface
     /**
      * {@inheritDoc}
      */
+    public function printTestPage(string $printerName): ActionResult
+    {
+        $cleanName = preg_replace('/[^A-Za-z0-9_.-]/', '', trim($printerName)) ?? '';
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.printer.test_page_failed',
+                details: ['printer' => $printerName, 'driver' => 'Linux'],
+            );
+        }
+
+        $testBanner = implode("\n", [
+            '====================================================',
+            '            IT TOOLBOX CLI - TEST PAGE              ',
+            '====================================================',
+            'Printer  : ' . $cleanName,
+            'Hostname : ' . (gethostname() ?: 'linux-host'),
+            'Date/Time: ' . gmdate('Y-m-d H:i:s \U\T\C'),
+            'Driver   : CUPS / LinuxDriver',
+            '====================================================',
+            '',
+        ]);
+
+        $tmpFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_testpage_' . uniqid() . '.txt';
+        @file_put_contents($tmpFile, $testBanner);
+
+        try {
+            $result = $this->processRunner->run(['lp', '-d', $cleanName, $tmpFile]);
+        } finally {
+            @unlink($tmpFile);
+        }
+
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.printer.test_page_success',
+                details: [
+                    'printer' => $cleanName,
+                    'output' => $result->output !== '' ? $result->output : 'Submitted to CUPS queue',
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        return new ActionResult(
+            success: false,
+            message: 'messages.printer.test_page_failed',
+            details: [
+                'printer' => $cleanName,
+                'error' => $result->errorOutput ?: 'lp command failed',
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function setDefaultPrinter(string $printerName): ActionResult
+    {
+        $cleanName = preg_replace('/[^A-Za-z0-9_.-]/', '', trim($printerName)) ?? '';
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.printer.default_set_failed',
+                details: ['printer' => $printerName, 'driver' => 'Linux'],
+            );
+        }
+
+        $result = $this->processRunner->run(['lpoptions', '-d', $cleanName]);
+
+        if ($this->isRoot() && $this->commandExists('lpadmin')) {
+            $this->processRunner->run(['lpadmin', '-d', $cleanName]);
+        }
+
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.printer.default_set_success',
+                details: [
+                    'printer' => $cleanName,
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        return new ActionResult(
+            success: false,
+            message: 'messages.printer.default_set_failed',
+            details: [
+                'printer' => $cleanName,
+                'error' => $result->errorOutput ?: 'lpoptions command failed',
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getHardwareInventory(): array
+    {
+        $osInfo = $this->getOsInfo();
+        $hwInfo = $this->getHardwareDiagnostics();
+        $interfaces = $this->getNetworkInterfaces();
+
+        $vendor = trim((string) ($this->readFile('/sys/class/dmi/id/sys_vendor') ?? '')) ?: 'N/A';
+        $product = trim((string) ($this->readFile('/sys/class/dmi/id/product_name') ?? '')) ?: 'N/A';
+        $serial = trim((string) ($this->readFile('/sys/class/dmi/id/product_serial') ?? '')) ?: 'N/A';
+        $biosVer = trim((string) ($this->readFile('/sys/class/dmi/id/bios_version') ?? '')) ?: 'N/A';
+        $boardVendor = trim((string) ($this->readFile('/sys/class/dmi/id/board_vendor') ?? ''));
+        $boardName = trim((string) ($this->readFile('/sys/class/dmi/id/board_name') ?? ''));
+        $motherboard = trim($boardVendor . ' ' . $boardName) ?: 'N/A';
+
+        $physicalDisks = [];
+        $lsblkResult = $this->processRunner->run(['lsblk', '-d', '-b', '-o', 'NAME,SIZE,ROTA,TRAN,MODEL', '-J']);
+        if ($lsblkResult->successful && $lsblkResult->output !== '') {
+            $decoded = json_decode($lsblkResult->output, true);
+            foreach ((array) ($decoded['blockdevices'] ?? []) as $dev) {
+                if (! is_array($dev)) {
+                    continue;
+                }
+                $name = (string) ($dev['name'] ?? '');
+                if (str_starts_with($name, 'loop') || str_starts_with($name, 'ram') || str_starts_with($name, 'sr')) {
+                    continue;
+                }
+                $rota = (bool) ($dev['rota'] ?? false);
+                $tran = strtoupper((string) ($dev['tran'] ?? 'SATA/NVMe'));
+                $mediaType = (! $rota || str_contains($name, 'nvme')) ? 'SSD / NVMe' : 'HDD (Rotational)';
+
+                $physicalDisks[] = [
+                    'model' => trim((string) ($dev['model'] ?? ('/dev/' . $name))) ?: ('/dev/' . $name),
+                    'size' => $this->formatBytes((float) ($dev['size'] ?? 0.0)),
+                    'media_type' => $mediaType,
+                    'bus_type' => $tran !== '' ? $tran : 'Block',
+                ];
+            }
+        }
+
+        return [
+            'system_identity' => [
+                'hostname' => $osInfo['hostname'] ?? 'linux-host',
+                'manufacturer' => $vendor,
+                'model' => $product,
+                'serial_number' => $serial,
+                'bios_version' => $biosVer,
+                'motherboard' => $motherboard,
+                'os_edition' => $osInfo['os_name'] ?? 'Linux',
+                'os_build' => sprintf('%s (%s)', $osInfo['os_version'] ?? '-', $osInfo['kernel'] ?? '-'),
+            ],
+            'processor_memory' => [
+                'cpu_model' => $hwInfo['cpu_model'] ?? 'Unknown CPU',
+                'cpu_cores' => $hwInfo['cpu_cores'] ?? 'N/A',
+                'ram_total' => $hwInfo['ram_total'] ?? 'N/A',
+                'ram_modules' => 'System Physical Memory (/proc/meminfo)',
+            ],
+            'physical_disks' => $physicalDisks,
+            'network_adapters' => array_map(
+                fn (array $iface): array => [
+                    'interface' => $iface['interface'] ?? '-',
+                    'ipv4' => $iface['ipv4'] ?? '-',
+                    'mac' => $iface['mac'] ?? '-',
+                    'status' => $iface['status'] ?? '-',
+                ],
+                $interfaces
+            ),
+        ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     protected function getDefaultBrowserCachePaths(): array
     {
         $home = (string) (getenv('HOME') ?: '/root');

@@ -223,6 +223,31 @@ function makeHealthDriver(
         {
             return [];
         }
+
+        public function printTestPage(string $printerName): ActionResult
+        {
+            return new ActionResult(true, 'ok');
+        }
+
+        public function setDefaultPrinter(string $printerName): ActionResult
+        {
+            return new ActionResult(true, 'ok');
+        }
+
+        public function runSystemBenchmark(int $diskSizeMb = 64, float $cpuDurationSeconds = 1.0): ActionResult
+        {
+            return new ActionResult(true, 'ok');
+        }
+
+        public function getHardwareInventory(): array
+        {
+            return [
+                'system_identity' => [],
+                'processor_memory' => [],
+                'physical_disks' => [],
+                'network_adapters' => [],
+            ];
+        }
     };
 }
 

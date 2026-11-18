@@ -231,6 +231,31 @@ it('generates localized Markdown (.md) and JSON (.json) diagnostic reports via R
         {
             return [];
         }
+
+        public function printTestPage(string $printerName): ActionResult
+        {
+            return new ActionResult(true, 'messages.printer.test_page_success');
+        }
+
+        public function setDefaultPrinter(string $printerName): ActionResult
+        {
+            return new ActionResult(true, 'messages.printer.default_set_success');
+        }
+
+        public function runSystemBenchmark(int $diskSizeMb = 64, float $cpuDurationSeconds = 1.0): ActionResult
+        {
+            return new ActionResult(true, 'messages.toolbox.benchmark_success');
+        }
+
+        public function getHardwareInventory(): array
+        {
+            return [
+                'system_identity' => [],
+                'processor_memory' => [],
+                'physical_disks' => [],
+                'network_adapters' => [],
+            ];
+        }
     };
 
     $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_test_' . uniqid();

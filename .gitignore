@@ -8,6 +8,8 @@ composer.lock
 it-toolbox-report-*.txt
 it-toolbox-report-*.md
 it-toolbox-report-*.json
+it-toolbox-inventory-*.md
+it-toolbox-inventory-*.json
 .DS_Store
 Thumbs.db
 .env

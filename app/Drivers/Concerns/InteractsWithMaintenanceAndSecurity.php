@@ -243,6 +243,88 @@ trait InteractsWithMaintenanceAndSecurity
     }
 
     /**
+     * Run a fast, zero-dependency CPU single-core and Disk sequential I/O micro-benchmark.
+     */
+    public function runSystemBenchmark(int $diskSizeMb = 64, float $cpuDurationSeconds = 1.0): ActionResult
+    {
+        $safeSizeMb = max(1, min(256, $diskSizeMb));
+        $safeCpuSeconds = max(0.02, min(5.0, $cpuDurationSeconds));
+
+        // 1. CPU Single-Core Cryptographic SHA-256 Benchmark
+        $cpuDurationNs = (int) round($safeCpuSeconds * 1_000_000_000);
+        $cpuStartNs = hrtime(true);
+        $iterations = 0;
+        $seed = 'it-toolbox-cli-v2.0.0-benchmark';
+
+        while ((hrtime(true) - $cpuStartNs) < $cpuDurationNs) {
+            for ($i = 0; $i < 2500; $i++) {
+                $seed = hash('sha256', $seed . $i);
+                $iterations++;
+            }
+        }
+
+        $cpuElapsedSec = max(0.001, (hrtime(true) - $cpuStartNs) / 1_000_000_000);
+        $opsPerSec = (int) round($iterations / $cpuElapsedSec);
+
+        // 2. Disk Sequential Write & Read I/O Benchmark
+        $tempFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_bench_' . uniqid('', true) . '.tmp';
+        $chunkSize = 1048576; // 1 MB
+        $chunkBuffer = str_repeat( hash('sha512', $seed, true), 16384 ); // 64 bytes * 16384 = 1 MB
+
+        $writeSpeedMb = 0.0;
+        $readSpeedMb = 0.0;
+
+        try {
+            $fpWrite = @fopen($tempFile, 'wb');
+            if (is_resource($fpWrite)) {
+                $writeStartNs = hrtime(true);
+                for ($m = 0; $m < $safeSizeMb; $m++) {
+                    @fwrite($fpWrite, $chunkBuffer, $chunkSize);
+                }
+                @fflush($fpWrite);
+                @fclose($fpWrite);
+                $writeElapsedSec = max(0.0001, (hrtime(true) - $writeStartNs) / 1_000_000_000);
+                $writeSpeedMb = round($safeSizeMb / $writeElapsedSec, 1);
+            }
+
+            if (is_file($tempFile)) {
+                $fpRead = @fopen($tempFile, 'rb');
+                if (is_resource($fpRead)) {
+                    $readStartNs = hrtime(true);
+                    while (! feof($fpRead)) {
+                        @fread($fpRead, $chunkSize);
+                    }
+                    @fclose($fpRead);
+                    $readElapsedSec = max(0.0001, (hrtime(true) - $readStartNs) / 1_000_000_000);
+                    $readSpeedMb = round($safeSizeMb / $readElapsedSec, 1);
+                }
+            }
+        } finally {
+            if (is_file($tempFile)) {
+                @unlink($tempFile);
+            }
+        }
+
+        $storageTier = match (true) {
+            $writeSpeedMb >= 350.0 => '🚀 NVMe / Fast SSD',
+            $writeSpeedMb >= 120.0 => '⚡ SATA SSD',
+            default => '🐢 HDD / Standard Storage',
+        };
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.toolbox.benchmark_success',
+            details: [
+                'cpu_score' => sprintf('%s SHA-256 ops/sec', number_format($opsPerSec)),
+                'disk_write_speed' => sprintf('%.1f MB/s (%d MB sample)', $writeSpeedMb, $safeSizeMb),
+                'disk_read_speed' => sprintf('%.1f MB/s (%d MB sample)', $readSpeedMb, $safeSizeMb),
+                'storage_tier' => $storageTier,
+                'driver' => $this->getDriverLabel(),
+            ],
+        );
+    }
+
+    /**
      * Calculate byte size of a cache file or directory tree safely.
      */
     protected function calculateCacheEntrySize(string $path): float
