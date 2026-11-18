@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Drivers;
 
+use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\ProcessRunnerInterface;
 use App\Contracts\SystemDriverInterface;
 use App\DTOs\ActionResult;
-use App\Services\SymfonyProcessRunner;
+use App\Services\SymfonyProcessExecutor;
 use Closure;
 use FilesystemIterator;
 use SplFileInfo;
@@ -54,13 +55,13 @@ class LinuxDriver implements SystemDriverInterface
     ];
 
     /**
-     * @param  ProcessRunnerInterface  $processRunner
+     * @param  ProcessExecutorInterface|ProcessRunnerInterface  $processRunner
      * @param  Closure|null  $fileReader  Optional custom file reader `fn(string $path): ?string` for testing.
      * @param  Closure|null  $uidResolver  Optional custom UID resolver `fn(): int` for testing.
      * @param  array<int, string>|null  $tempDirectories  Optional custom temp directories for testing.
      */
     public function __construct(
-        private readonly ProcessRunnerInterface $processRunner = new SymfonyProcessRunner(),
+        private readonly ProcessExecutorInterface|ProcessRunnerInterface $processRunner = new SymfonyProcessExecutor(),
         private readonly ?Closure $fileReader = null,
         private readonly ?Closure $uidResolver = null,
         private readonly ?array $tempDirectories = null,
@@ -139,7 +140,6 @@ class LinuxDriver implements SystemDriverInterface
         }
 
         $lines = preg_split('/\r\n|\r|\n/', trim($result->output)) ?: [];
-        // Drop the POSIX header row ("Filesystem 1048576-blocks ...").
         array_shift($lines);
 
         $disks = [];
@@ -204,7 +204,6 @@ class LinuxDriver implements SystemDriverInterface
         }
 
         $lines = preg_split('/\r\n|\r|\n/', trim($result->output)) ?: [];
-        // Remove the header line ("PID COMMAND %CPU %MEM RSS").
         array_shift($lines);
 
         $processes = [];
@@ -214,7 +213,6 @@ class LinuxDriver implements SystemDriverInterface
                 continue;
             }
 
-            // Match: PID (int), COMMAND (may contain spaces if kernel thread, but comm is up to 15 chars), %CPU, %MEM, RSS (KB)
             if (preg_match('/^(\d+)\s+(.+?)\s+([\d.]+)\s+([\d.]+)\s+(\d+)$/', $line, $matches) === 1) {
                 $pid = (int) $matches[1];
                 $name = trim($matches[2]);
@@ -248,7 +246,7 @@ class LinuxDriver implements SystemDriverInterface
         }
 
         // Primary mechanism on native Linux runtime: posix_kill($pid, SIGTERM)
-        if ($this->processRunner instanceof SymfonyProcessRunner && function_exists('posix_kill')) {
+        if ($this->processRunner instanceof SymfonyProcessExecutor && function_exists('posix_kill')) {
             $sigTerm = defined('SIGTERM') ? (int) constant('SIGTERM') : 15;
             if (@posix_kill($pid, $sigTerm)) {
                 return new ActionResult(
@@ -274,7 +272,7 @@ class LinuxDriver implements SystemDriverInterface
                 );
             }
         } else {
-            // Polite SIGTERM via process runner when ext-posix is unavailable or mocked
+            // Polite SIGTERM via process executor when ext-posix is unavailable or mocked
             $sigTermResult = $this->processRunner->run(['kill', '-15', (string) $pid]);
 
             if ($sigTermResult->successful) {
@@ -669,7 +667,6 @@ class LinuxDriver implements SystemDriverInterface
                         continue;
                     }
 
-                    // Non-root users only clean files they own; root cleans files older than 24h
                     $ownerUid = @$entry->getOwner();
                     $mtime = @$entry->getMTime();
 
@@ -720,12 +717,16 @@ class LinuxDriver implements SystemDriverInterface
     }
 
     /**
-     * Read a file from the filesystem or injected test reader.
+     * Read a file from the filesystem or injected ProcessExecutorInterface / test reader.
      */
     protected function readFile(string $path): ?string
     {
         if ($this->fileReader !== null) {
             return ($this->fileReader)($path);
+        }
+
+        if ($this->processRunner instanceof ProcessExecutorInterface) {
+            return $this->processRunner->readFile($path);
         }
 
         if (! is_readable($path)) {
@@ -762,6 +763,10 @@ class LinuxDriver implements SystemDriverInterface
     {
         if ($this->uidResolver !== null) {
             return (int) ($this->uidResolver)();
+        }
+
+        if ($this->processRunner instanceof ProcessExecutorInterface) {
+            return $this->processRunner->getEffectiveUid();
         }
 
         if (function_exists('posix_geteuid')) {
@@ -1265,7 +1270,6 @@ class LinuxDriver implements SystemDriverInterface
         $address = substr($endpoint, 0, $lastColon);
         $port = substr($endpoint, $lastColon + 1);
 
-        // Clean interface zone suffix like 0.0.0.0%lo
         if (str_contains($address, '%')) {
             $address = explode('%', $address)[0];
         }
