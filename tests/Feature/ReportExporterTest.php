@@ -186,6 +186,51 @@ it('generates localized Markdown (.md) and JSON (.json) diagnostic reports via R
         {
             return new ActionResult(true, 'messages.maintenance.clean_success');
         }
+
+        public function repairOsIntegrity(): ActionResult
+        {
+            return new ActionResult(true, 'messages.maintenance.repair_success');
+        }
+
+        public function findLargeFiles(?string $directory = null, int $limit = 15): array
+        {
+            return [];
+        }
+
+        public function cleanBrowserCaches(?array $customCachePaths = null): ActionResult
+        {
+            return new ActionResult(true, 'messages.maintenance.browsers_clean_success');
+        }
+
+        public function getPendingUpdates(): array
+        {
+            return [];
+        }
+
+        public function getScheduledTasks(): array
+        {
+            return [];
+        }
+
+        public function runSecurityAudit(): array
+        {
+            return [];
+        }
+
+        public function getLocalUsersAudit(): array
+        {
+            return [];
+        }
+
+        public function getNetworkShares(): array
+        {
+            return [];
+        }
+
+        public function inspectHostsFile(?string $customContent = null): array
+        {
+            return [];
+        }
     };
 
     $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_test_' . uniqid();

@@ -398,3 +398,130 @@ it('parses Windows critical services, battery health, startup items, USB devices
         ->and($pathAudit['summary']['broken'])->toBe(1)
         ->and($pathAudit['summary']['duplicate'])->toBe(1);
 });
+
+it('executes Windows OS repair, pending updates, scheduled tasks, security audit, users audit, SMB shares, large files, browser cache cleanup, and hosts inspection', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $callIndex = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->callIndex++;
+
+            return match ($this->callIndex) {
+                1 => new ProcessResult(0, 'Admin OK'), // net session
+                2 => new ProcessResult(0, 'Windows Resource Protection did not find any integrity violations.'), // sfc
+                3 => new ProcessResult(0, 'The restore operation completed successfully.'), // DISM
+                4 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'Package' => '2026-11 Cumulative Update for Windows 11 (KB5046617)',
+                        'Version' => 'KB5046617',
+                        'Source' => 'Windows Update',
+                        'Status' => 'Available',
+                    ],
+                ])),
+                5 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'TaskName' => 'GoogleUpdateTaskMachineCore',
+                        'TaskPath' => '\\GoogleSystem\\GoogleUpdater\\',
+                        'NextRun' => '2026-11-19 08:00',
+                        'State' => 'Ready',
+                    ],
+                ])),
+                6 => new ProcessResult(0, (string) json_encode([
+                    'FirewallAllOn' => true,
+                    'FirewallSummary' => 'Domain: ON, Private: ON, Public: ON',
+                    'AvEnabled' => true,
+                    'RtpEnabled' => true,
+                    'UacEnabled' => true,
+                ])),
+                7 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'Name' => 'Administrator',
+                        'Enabled' => true,
+                        'IsAdmin' => true,
+                        'LastLogon' => '2026-11-18 09:00',
+                    ],
+                ])),
+                8 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'Name' => 'PublicDocs',
+                        'Path' => 'C:\\Users\\Public\\Documents',
+                        'ShareType' => 'FileSystemVolume',
+                        'Description' => 'Shared Documents',
+                    ],
+                ])),
+                default => new ProcessResult(0, '[]'),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $repair = $driver->repairOsIntegrity();
+    expect($repair->success)->toBeTrue()
+        ->and($repair->details['commands_executed'])->toContain('sfc /scannow', 'DISM /Online /Cleanup-Image /RestoreHealth');
+
+    $updates = $driver->getPendingUpdates();
+    expect($updates)->toHaveCount(1)
+        ->and($updates[0]['version'])->toBe('KB5046617');
+
+    $tasks = $driver->getScheduledTasks();
+    expect($tasks)->toHaveCount(1)
+        ->and($tasks[0]['name'])->toBe('GoogleUpdateTaskMachineCore');
+
+    $security = $driver->runSecurityAudit();
+    expect($security)->toHaveCount(3)
+        ->and($security[0]['status'])->toBe('ENABLED')
+        ->and($security[1]['status'])->toBe('PROTECTED')
+        ->and($security[2]['status'])->toBe('ENABLED');
+
+    $users = $driver->getLocalUsersAudit();
+    expect($users)->toHaveCount(1)
+        ->and($users[0]['username'])->toBe('Administrator')
+        ->and($users[0]['is_admin'])->toContain('YES');
+
+    $shares = $driver->getNetworkShares();
+    expect($shares)->toHaveCount(1)
+        ->and($shares[0]['name'])->toBe('PublicDocs');
+
+    $hosts = $driver->inspectHostsFile("# Comment line\n127.0.0.1 localhost\n127.0.0.1 myapp.local\n203.0.113.55 login.bank.com\n");
+    expect($hosts)->toHaveCount(3)
+        ->and($hosts[0]['status'])->toBe('STANDARD')
+        ->and($hosts[1]['status'])->toBe('CUSTOM_LOCAL')
+        ->and($hosts[2]['status'])->toBe('EXTERNAL_REDIRECT');
+
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_maint_' . uniqid();
+    $cacheDir = $tempDir . DIRECTORY_SEPARATOR . 'chrome_cache';
+    mkdir($cacheDir, 0777, true);
+    file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'small.bin', str_repeat('A', 128));
+    file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'large.bin', str_repeat('B', 2048));
+    file_put_contents($cacheDir . DIRECTORY_SEPARATOR . 'data_1', str_repeat('C', 1024));
+
+    try {
+        $largeFiles = $driver->findLargeFiles($tempDir, 5);
+        expect($largeFiles)->not->toBeEmpty()
+            ->and(basename($largeFiles[0]['path']))->toBe('large.bin');
+
+        $browserClean = $driver->cleanBrowserCaches(['Google Chrome' => $cacheDir]);
+        expect($browserClean->success)->toBeTrue()
+            ->and($browserClean->details['deleted_files'])->toBe(1)
+            ->and($browserClean->details['freed_space'])->toBe('1.00 KB');
+    } finally {
+        @unlink($tempDir . DIRECTORY_SEPARATOR . 'small.bin');
+        @unlink($tempDir . DIRECTORY_SEPARATOR . 'large.bin');
+        @unlink($cacheDir . DIRECTORY_SEPARATOR . 'data_1');
+        @rmdir($cacheDir);
+        @rmdir($tempDir);
+    }
+});

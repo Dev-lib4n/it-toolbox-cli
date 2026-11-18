@@ -296,3 +296,86 @@ it('parses Linux critical services, /sys battery telemetry, systemd startup unit
     expect($killByName->success)->toBeTrue()
         ->and($killByName->details['process_name'])->toBe('firefox');
 });
+
+it('executes Linux package integrity audit, pending APT updates, cron/systemd scheduler, security posture audit, local users, and Samba/NFS shares', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        /** @var array<string, string> */
+        public array $files = [
+            '/etc/crontab' => "0 3 * * * root /usr/local/bin/backup.sh\n",
+            '/sys/module/apparmor/parameters/enabled' => "Y\n",
+            '/etc/ssh/sshd_config' => "PermitRootLogin no\n",
+            '/etc/passwd' => "root:x:0:0:root:/root:/bin/bash\nadminuser:x:1000:1000:Admin:/home/adminuser:/bin/bash\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\n",
+            '/etc/group' => "sudo:x:27:adminuser\n",
+            '/etc/samba/smb.conf' => "[global]\nworkgroup = WORKGROUP\n[ projects ]\npath = /srv/samba/projects\ncomment = Engineering Files\n",
+            '/etc/exports' => "/srv/nfs/backups 192.168.1.0/24(rw,sync,no_subtree_check)\n",
+        ];
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            return match ($command) {
+                ['which', 'dpkg'] => new ProcessResult(0, '/usr/bin/dpkg'),
+                ['dpkg', '--audit'] => new ProcessResult(0, ''),
+                ['which', 'apt-get'] => new ProcessResult(0, '/usr/bin/apt-get'),
+                ['apt-get', 'check'] => new ProcessResult(0, ''),
+                ['which', 'apt'] => new ProcessResult(0, '/usr/bin/apt'),
+                ['apt', 'list', '--upgradable'] => new ProcessResult(
+                    0,
+                    "Listing... Done\nopenssl/noble-security 3.0.13-0ubuntu3.4 amd64 [upgradable from: 3.0.13-0ubuntu3.1]\n"
+                ),
+                ['systemctl', 'list-timers', '--no-pager', '--no-legend'] => new ProcessResult(
+                    0,
+                    "Thu 2026-11-19 06:00:00 UTC 14h left apt-daily.timer apt-daily.service\n"
+                ),
+                ['which', 'ufw'] => new ProcessResult(0, '/usr/sbin/ufw'),
+                ['ufw', 'status'] => new ProcessResult(0, "Status: active\n"),
+                ['which', 'getenforce'] => new ProcessResult(1, '', '', false),
+                default => new ProcessResult(1, '', '', false),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return $this->files[$path] ?? null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new LinuxDriver($executor);
+
+    $repair = $driver->repairOsIntegrity();
+    expect($repair->success)->toBeTrue()
+        ->and($repair->details['commands_executed'])->toContain('dpkg --audit', 'apt-get check');
+
+    $updates = $driver->getPendingUpdates();
+    expect($updates)->toHaveCount(1)
+        ->and($updates[0]['package'])->toBe('openssl')
+        ->and($updates[0]['version'])->toBe('3.0.13-0ubuntu3.4');
+
+    $tasks = $driver->getScheduledTasks();
+    expect($tasks)->toHaveCount(2)
+        ->and($tasks[0]['name'])->toBe('/usr/local/bin/backup.sh')
+        ->and($tasks[1]['name'])->toBe('apt-daily.timer');
+
+    $security = $driver->runSecurityAudit();
+    expect($security)->toHaveCount(3)
+        ->and($security[0]['status'])->toBe('ENABLED')
+        ->and($security[1]['status'])->toBe('PROTECTED')
+        ->and($security[2]['status'])->toBe('HARDENED');
+
+    $users = $driver->getLocalUsersAudit();
+    expect($users)->toHaveCount(2)
+        ->and($users[0]['username'])->toContain('root')
+        ->and($users[1]['username'])->toContain('adminuser')
+        ->and($users[1]['is_admin'])->toContain('YES');
+
+    $shares = $driver->getNetworkShares();
+    expect($shares)->toHaveCount(2)
+        ->and($shares[0]['name'])->toBe('projects')
+        ->and($shares[0]['type'])->toBe('Samba (SMB)')
+        ->and($shares[1]['type'])->toBe('NFS Export');
+});

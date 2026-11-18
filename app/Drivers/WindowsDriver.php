@@ -6,6 +6,7 @@ namespace App\Drivers;
 
 use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\SystemDriverInterface;
+use App\Drivers\Concerns\InteractsWithMaintenanceAndSecurity;
 use App\Drivers\Concerns\InteractsWithNetworkSockets;
 use App\DTOs\ActionResult;
 use App\DTOs\ProcessResult;
@@ -13,6 +14,7 @@ use App\Services\SymfonyProcessExecutor;
 
 class WindowsDriver implements SystemDriverInterface
 {
+    use InteractsWithMaintenanceAndSecurity;
     use InteractsWithNetworkSockets;
 
     private const UTF8_PREAMBLE = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; ';
@@ -1184,6 +1186,318 @@ PS;
                 'driver' => 'Windows',
             ],
         );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function repairOsIntegrity(): ActionResult
+    {
+        $adminCheck = $this->processRunner->run(['net', 'session'], 5);
+        if (! $adminCheck->successful) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.common.permission_denied',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $sfcResult = $this->processRunner->run(['sfc', '/scannow'], 300);
+        $dismResult = $this->processRunner->run(['DISM', '/Online', '/Cleanup-Image', '/RestoreHealth'], 300);
+
+        $combinedOutput = $this->normalizeConsoleOutput($sfcResult->output . ' ' . $dismResult->output);
+        $succeeded = $sfcResult->successful && $dismResult->successful;
+
+        return new ActionResult(
+            success: $succeeded,
+            message: $succeeded ? 'messages.maintenance.repair_success' : 'messages.maintenance.repair_failed',
+            details: [
+                'commands_executed' => [
+                    'sfc /scannow',
+                    'DISM /Online /Cleanup-Image /RestoreHealth',
+                ],
+                'output' => $combinedOutput !== '' ? $this->truncateLogMessage($combinedOutput, 110) : 'Completed',
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getPendingUpdates(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$results = @();
+try {
+    $session = New-Object -ComObject Microsoft.Update.Session;
+    $searcher = $session.CreateUpdateSearcher();
+    $searchResult = $searcher.Search("IsInstalled=0 and Type='Software'");
+    foreach ($upd in $searchResult.Updates) {
+        $kb = if ($upd.KBArticleIDs.Count -gt 0) { "KB" + ($upd.KBArticleIDs | Select-Object -First 1) } else { "Update" };
+        $results += [PSCustomObject]@{
+            Package = [string]$upd.Title;
+            Version = [string]$kb;
+            Source = 'Windows Update';
+            Status = if ($upd.IsDownloaded) { 'Downloaded (Pending Install)' } else { 'Available' }
+        };
+    }
+} catch {}
+
+if ($results.Count -eq 0) {
+    $hotfixes = @(Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5);
+    foreach ($hf in $hotfixes) {
+        $installedDate = if ($hf.InstalledOn -is [DateTime]) { $hf.InstalledOn.ToString('yyyy-MM-dd') } else { 'Installed' };
+        $results += [PSCustomObject]@{
+            Package = [string]($hf.Description + ' (' + $hf.HotFixID + ')');
+            Version = [string]$hf.HotFixID;
+            Source = 'Get-HotFix';
+            Status = "Installed ($installedDate)"
+        };
+    }
+}
+$results | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script, 45));
+
+        $updates = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['Package'])) {
+                continue;
+            }
+
+            $updates[] = [
+                'package' => $this->truncateLogMessage((string) $item['Package'], 65),
+                'version' => trim((string) ($item['Version'] ?? '-')),
+                'source' => trim((string) ($item['Source'] ?? 'Windows Update')),
+                'status' => trim((string) ($item['Status'] ?? 'Available')),
+            ];
+        }
+
+        return $updates;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getScheduledTasks(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and $_.TaskPath -notlike '\Microsoft\*' } | Select-Object -First 25 | ForEach-Object {
+    $info = Get-ScheduledTaskInfo -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue;
+    $nextRun = if ($null -ne $info -and $info.NextRunTime -is [DateTime] -and $info.NextRunTime.Year -gt 2000) { $info.NextRunTime.ToString('yyyy-MM-dd HH:mm') } else { '-' };
+    [PSCustomObject]@{
+        TaskName = [string]$_.TaskName;
+        TaskPath = [string]$_.TaskPath;
+        NextRun = [string]$nextRun;
+        State = [string]$_.State
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $tasks = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['TaskName'])) {
+                continue;
+            }
+
+            $tasks[] = [
+                'name' => trim((string) $item['TaskName']),
+                'schedule' => trim((string) ($item['TaskPath'] ?? '\\')),
+                'next_run' => trim((string) ($item['NextRun'] ?? '-')),
+                'status' => trim((string) ($item['State'] ?? 'Ready')),
+            ];
+        }
+
+        return $tasks;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function runSecurityAudit(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$fw = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue | ForEach-Object {
+    "$($_.Name): " + ($(if ($_.Enabled) { 'ON' } else { 'OFF' }))
+});
+$fwAllOn = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue | Where-Object { -not $_.Enabled }).Count -eq 0 -and $fw.Count -gt 0;
+
+$mp = Get-MpComputerStatus -ErrorAction SilentlyContinue;
+$avEnabled = if ($null -ne $mp) { [bool]$mp.AntivirusEnabled } else { $false };
+$rtpEnabled = if ($null -ne $mp) { [bool]$mp.RealTimeProtectionEnabled } else { $false };
+
+$uac = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'EnableLUA' -ErrorAction SilentlyContinue).EnableLUA;
+$uacEnabled = ($uac -eq 1);
+
+[PSCustomObject]@{
+    FirewallAllOn = [bool]$fwAllOn;
+    FirewallSummary = [string]($fw -join ', ');
+    AvEnabled = [bool]$avEnabled;
+    RtpEnabled = [bool]$rtpEnabled;
+    UacEnabled = [bool]$uacEnabled
+} | ConvertTo-Json -Compress
+PS;
+
+        $data = $this->runPowerShellJson($script);
+
+        $fwOn = (bool) ($data['FirewallAllOn'] ?? false);
+        $avOn = (bool) ($data['AvEnabled'] ?? false) && (bool) ($data['RtpEnabled'] ?? false);
+        $uacOn = (bool) ($data['UacEnabled'] ?? false);
+
+        return [
+            [
+                'component' => 'Windows Defender Firewall',
+                'status' => $fwOn ? 'ENABLED' : 'WARNING',
+                'icon' => $fwOn ? '✅' : '⚠️',
+                'details' => trim((string) ($data['FirewallSummary'] ?? '')) ?: ($fwOn ? 'All profiles active' : 'One or more profiles disabled'),
+            ],
+            [
+                'component' => 'Microsoft Defender Antivirus',
+                'status' => $avOn ? 'PROTECTED' : 'WARNING',
+                'icon' => $avOn ? '✅' : '⚠️',
+                'details' => sprintf(
+                    'AV: %s | Real-Time Protection: %s',
+                    ! empty($data['AvEnabled']) ? 'ON' : 'OFF',
+                    ! empty($data['RtpEnabled']) ? 'ON' : 'OFF'
+                ),
+            ],
+            [
+                'component' => 'User Account Control (UAC)',
+                'status' => $uacOn ? 'ENABLED' : 'DISABLED',
+                'icon' => $uacOn ? '✅' : '❌',
+                'details' => $uacOn ? 'EnableLUA = 1 (Active)' : 'EnableLUA = 0 (Disabled)',
+            ],
+        ];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getLocalUsersAudit(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$admins = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction SilentlyContinue | ForEach-Object {
+    ($_.Name -split '\\')[-1].ToLower()
+});
+@(Get-LocalUser -ErrorAction SilentlyContinue | ForEach-Object {
+    $isAdm = $admins -contains $_.Name.ToLower();
+    $lastLogon = if ($_.LastLogon -is [DateTime] -and $_.LastLogon.Year -gt 2000) { $_.LastLogon.ToString('yyyy-MM-dd HH:mm') } else { 'Never' };
+    [PSCustomObject]@{
+        Name = [string]$_.Name;
+        Enabled = [bool]$_.Enabled;
+        IsAdmin = [bool]$isAdm;
+        LastLogon = [string]$lastLogon
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $users = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['Name'])) {
+                continue;
+            }
+
+            $enabled = ! empty($item['Enabled']);
+            $isAdmin = ! empty($item['IsAdmin']);
+
+            $users[] = [
+                'username' => trim((string) $item['Name']),
+                'status' => $enabled ? '✅ Enabled' : '⚪ Disabled',
+                'is_admin' => $isAdmin ? '⚠️ YES (Administrator)' : 'No',
+                'last_logon' => trim((string) ($item['LastLogon'] ?? '-')),
+            ];
+        }
+
+        return $users;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getNetworkShares(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-SmbShare -ErrorAction SilentlyContinue | ForEach-Object {
+    [PSCustomObject]@{
+        Name = [string]$_.Name;
+        Path = [string]$_.Path;
+        ShareType = [string]$_.ShareType;
+        Description = [string]$_.Description
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $shares = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['Name'])) {
+                continue;
+            }
+
+            $shares[] = [
+                'name' => trim((string) $item['Name']),
+                'path' => trim((string) ($item['Path'] ?? '-')) ?: '-',
+                'type' => 'SMB (' . (trim((string) ($item['ShareType'] ?? 'FileSystemVolume')) ?: 'Disk') . ')',
+                'description' => trim((string) ($item['Description'] ?? '-')) ?: '-',
+            ];
+        }
+
+        return $shares;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function getDefaultBrowserCachePaths(): array
+    {
+        $localAppData = (string) (getenv('LOCALAPPDATA') ?: ((getenv('USERPROFILE') ?: 'C:\\Users\\Default') . '\\AppData\\Local'));
+
+        $paths = [
+            'Google Chrome (Cache)' => $localAppData . '\\Google\\Chrome\\User Data\\Default\\Cache\\Cache_Data',
+            'Google Chrome (Code Cache)' => $localAppData . '\\Google\\Chrome\\User Data\\Default\\Code Cache',
+            'Microsoft Edge (Cache)' => $localAppData . '\\Microsoft\\Edge\\User Data\\Default\\Cache\\Cache_Data',
+            'Microsoft Edge (Code Cache)' => $localAppData . '\\Microsoft\\Edge\\User Data\\Default\\Code Cache',
+        ];
+
+        $firefoxProfilesDir = $localAppData . '\\Mozilla\\Firefox\\Profiles';
+        if (is_dir($firefoxProfilesDir) && is_readable($firefoxProfilesDir)) {
+            foreach (glob($firefoxProfilesDir . '\\*\\cache2\\entries') ?: [] as $idx => $ffCache) {
+                $paths['Mozilla Firefox (Profile ' . ($idx + 1) . ')'] = $ffCache;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function readHostsFileContent(): ?string
+    {
+        $systemRoot = (string) (getenv('SystemRoot') ?: 'C:\\Windows');
+        $hostsPath = $systemRoot . '\\System32\\drivers\\etc\\hosts';
+
+        return $this->processRunner->readFile($hostsPath);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function getDriverLabel(): string
+    {
+        return 'Windows';
     }
 
     /**
