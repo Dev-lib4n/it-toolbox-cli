@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, homologation, 'feat/**', 'docs/**' ]
+  pull_request:
+    branches: [ main, homologation ]
+
+jobs:
+  tests:
+    name: Pest Tests (${{ matrix.os }} - PHP ${{ matrix.php }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        php: ['8.3']
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, json, ctype, tokenizer, dom, xml
+          coverage: none
+          tools: composer:v2
+
+      - name: Install Composer Dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Execute Test Suite (Pest PHP)
+        run: ./vendor/bin/pest
