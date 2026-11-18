@@ -205,4 +205,71 @@ interface SystemDriverInterface
      * @return ActionResult
      */
     public function cleanTempFiles(): ActionResult;
+
+    /**
+     * Run OS image and package integrity verification / repair (SFC & DISM on Windows; dpkg/apt/rpm/pacman audit on Linux).
+     *
+     * @return ActionResult
+     */
+    public function repairOsIntegrity(): ActionResult;
+
+    /**
+     * Scan a target directory recursively and return the largest files sorted by size descending.
+     *
+     * @param  string|null  $directory
+     * @param  int  $limit
+     * @return array<int, array{path: string, size_bytes: float, size_formatted: string, modified_at: string}>
+     */
+    public function findLargeFiles(?string $directory = null, int $limit = 15): array;
+
+    /**
+     * Safely clean browser cache directories (Chrome, Edge, Firefox) without touching passwords, cookies, or history.
+     *
+     * @param  array<string, string>|null  $customCachePaths  Optional map of browser label => cache path for testing.
+     * @return ActionResult
+     */
+    public function cleanBrowserCaches(?array $customCachePaths = null): ActionResult;
+
+    /**
+     * Retrieve pending OS and package updates.
+     *
+     * @return array<int, array{package: string, version: string, source: string, status: string}>
+     */
+    public function getPendingUpdates(): array;
+
+    /**
+     * Retrieve active non-system scheduled tasks, cron jobs, and systemd timers.
+     *
+     * @return array<int, array{name: string, schedule: string, next_run: string, status: string}>
+     */
+    public function getScheduledTasks(): array;
+
+    /**
+     * Run a unified security posture audit (Firewall, Antivirus/Defender/MAC, and UAC/Sudo/SSH policy).
+     *
+     * @return array<int, array{component: string, status: string, icon: string, details: string}>
+     */
+    public function runSecurityAudit(): array;
+
+    /**
+     * Audit local user accounts, active status, last logon, and Administrative / sudo membership.
+     *
+     * @return array<int, array{username: string, status: string, is_admin: string, last_logon: string}>
+     */
+    public function getLocalUsersAudit(): array;
+
+    /**
+     * Retrieve active SMB / Samba / NFS network shares.
+     *
+     * @return array<int, array{name: string, path: string, type: string, description: string}>
+     */
+    public function getNetworkShares(): array;
+
+    /**
+     * Inspect the system hosts file and highlight custom or suspicious domain redirections.
+     *
+     * @param  string|null  $customContent  Optional raw hosts file content for testing.
+     * @return array<int, array{ip: string, host: string, status: string, icon: string}>
+     */
+    public function inspectHostsFile(?string $customContent = null): array;
 }

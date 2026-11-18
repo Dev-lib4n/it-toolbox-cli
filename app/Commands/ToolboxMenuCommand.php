@@ -50,9 +50,10 @@ class ToolboxMenuCommand extends Command
                     '3' => (string) __('messages.menu.categories.printers'),
                     '4' => (string) __('messages.menu.categories.network'),
                     '5' => (string) __('messages.menu.categories.maintenance'),
-                    '6' => (string) __('messages.menu.categories.reports'),
-                    '7' => (string) __('messages.menu.categories.self_update'),
-                    '8' => (string) __('messages.menu.categories.language'),
+                    '6' => (string) __('messages.menu.categories.security'),
+                    '7' => (string) __('messages.menu.categories.reports'),
+                    '8' => (string) __('messages.menu.categories.self_update'),
+                    '9' => (string) __('messages.menu.categories.language'),
                     '0' => (string) __('messages.menu.exit'),
                 ],
                 defaultKey: '1',
@@ -67,11 +68,11 @@ class ToolboxMenuCommand extends Command
 
             if ($choice === '1') {
                 $this->executeSubcommand('health:check', $locale);
-            } elseif ($choice === '6') {
-                $this->executeSubcommand('report:export', $locale);
             } elseif ($choice === '7') {
-                $this->executeSubcommand('self:update', $locale);
+                $this->executeSubcommand('report:export', $locale);
             } elseif ($choice === '8') {
+                $this->executeSubcommand('self:update', $locale);
+            } elseif ($choice === '9') {
                 $locale = $this->promptNumericLanguageSwitch($locale);
             } else {
                 $category = match ($choice) {
@@ -79,6 +80,7 @@ class ToolboxMenuCommand extends Command
                     '3' => 'printers',
                     '4' => 'network',
                     '5' => 'maintenance',
+                    '6' => 'security',
                     default => 'system',
                 };
 
@@ -184,6 +186,17 @@ class ToolboxMenuCommand extends Command
                 ],
                 'maintenance' => [
                     '1' => ['label' => (string) __('messages.menu.actions.clean_temp'), 'command' => 'clean:temp'],
+                    '2' => ['label' => (string) __('messages.menu.actions.maintenance_browsers'), 'command' => 'maintenance:browsers'],
+                    '3' => ['label' => (string) __('messages.menu.actions.maintenance_large_files'), 'command' => 'maintenance:large-files'],
+                    '4' => ['label' => (string) __('messages.menu.actions.maintenance_repair'), 'command' => 'maintenance:repair'],
+                    '5' => ['label' => (string) __('messages.menu.actions.maintenance_updates'), 'command' => 'maintenance:updates'],
+                    '6' => ['label' => (string) __('messages.menu.actions.maintenance_scheduler'), 'command' => 'maintenance:scheduler'],
+                ],
+                'security' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.security_audit'), 'command' => 'security:audit'],
+                    '2' => ['label' => (string) __('messages.menu.actions.security_users'), 'command' => 'security:users'],
+                    '3' => ['label' => (string) __('messages.menu.actions.security_shares'), 'command' => 'security:shares'],
+                    '4' => ['label' => (string) __('messages.menu.actions.security_hosts'), 'command' => 'security:hosts'],
                 ],
                 default => [],
             };

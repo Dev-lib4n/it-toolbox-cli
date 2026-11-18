@@ -6,6 +6,7 @@ namespace App\Drivers;
 
 use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\SystemDriverInterface;
+use App\Drivers\Concerns\InteractsWithMaintenanceAndSecurity;
 use App\Drivers\Concerns\InteractsWithNetworkSockets;
 use App\DTOs\ActionResult;
 use App\Services\SymfonyProcessExecutor;
@@ -16,6 +17,7 @@ use Throwable;
 
 class LinuxDriver implements SystemDriverInterface
 {
+    use InteractsWithMaintenanceAndSecurity;
     use InteractsWithNetworkSockets;
     /**
      * Real block/disk filesystem types to include in storage health checks.
@@ -1270,6 +1272,445 @@ class LinuxDriver implements SystemDriverInterface
                 'driver' => 'Linux',
             ],
         );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function repairOsIntegrity(): ActionResult
+    {
+        $executed = [];
+        $outputs = [];
+
+        if ($this->commandExists('dpkg')) {
+            $res = $this->processRunner->run(['dpkg', '--audit']);
+            $executed[] = 'dpkg --audit';
+            $outputs[] = $res->output !== '' ? $res->output : 'dpkg: no broken packages found';
+        }
+
+        if ($this->commandExists('apt-get') && $this->isRoot()) {
+            $res = $this->processRunner->run(['apt-get', 'check']);
+            $executed[] = 'apt-get check';
+            if ($res->output !== '') {
+                $outputs[] = $res->output;
+            }
+        }
+
+        if ($executed === [] && $this->commandExists('rpm')) {
+            $res = $this->processRunner->run(['rpm', '-Va', '--nofiles', '--nodigest']);
+            $executed[] = 'rpm -Va --nofiles --nodigest';
+            $outputs[] = $res->output !== '' ? $res->output : 'rpm: package database verified';
+        }
+
+        if ($executed === [] && $this->commandExists('pacman')) {
+            $res = $this->processRunner->run(['pacman', '-Qk']);
+            $executed[] = 'pacman -Qk';
+            $outputs[] = $res->output !== '' ? $res->output : 'pacman: all packages intact';
+        }
+
+        if ($executed === []) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.maintenance.repair_failed',
+                details: ['driver' => 'Linux'],
+            );
+        }
+
+        $summaryOutput = $this->truncateLogMessage(implode(' | ', $outputs), 110);
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.maintenance.repair_success',
+            details: [
+                'commands_executed' => $executed,
+                'output' => $summaryOutput,
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getPendingUpdates(): array
+    {
+        $updates = [];
+
+        if ($this->commandExists('apt')) {
+            $res = $this->processRunner->run(['apt', 'list', '--upgradable']);
+            if ($res->successful && $res->output !== '') {
+                $lines = preg_split('/\r\n|\r|\n/', trim($res->output)) ?: [];
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '' || str_starts_with(strtolower($line), 'listing')) {
+                        continue;
+                    }
+                    // Format: "curl/noble-updates 8.5.0-2ubuntu10.4 amd64 [upgradable from: 8.5.0-2ubuntu10.1]"
+                    if (preg_match('/^([^\/\s]+)\/(\S+)\s+(\S+)\s+\S+/', $line, $m) === 1) {
+                        $updates[] = [
+                            'package' => $m[1],
+                            'version' => $m[3],
+                            'source' => 'APT (' . $m[2] . ')',
+                            'status' => 'Upgradable',
+                        ];
+                    }
+                }
+
+                return array_slice($updates, 0, 30);
+            }
+        }
+
+        if ($this->commandExists('dnf')) {
+            $res = $this->processRunner->run(['dnf', 'check-update', '--quiet']);
+            if ($res->output !== '') {
+                $lines = preg_split('/\r\n|\r|\n/', trim($res->output)) ?: [];
+                foreach ($lines as $line) {
+                    $parts = preg_split('/\s+/', trim($line));
+                    if (is_array($parts) && count($parts) >= 3) {
+                        $updates[] = [
+                            'package' => $parts[0],
+                            'version' => $parts[1],
+                            'source' => 'DNF (' . $parts[2] . ')',
+                            'status' => 'Upgradable',
+                        ];
+                    }
+                }
+
+                return array_slice($updates, 0, 30);
+            }
+        }
+
+        if ($this->commandExists('pacman')) {
+            $res = $this->processRunner->run(['pacman', '-Qu']);
+            if ($res->successful && $res->output !== '') {
+                $lines = preg_split('/\r\n|\r|\n/', trim($res->output)) ?: [];
+                foreach ($lines as $line) {
+                    if (preg_match('/^(\S+)\s+(\S+)\s+->\s+(\S+)/', trim($line), $m) === 1) {
+                        $updates[] = [
+                            'package' => $m[1],
+                            'version' => $m[3],
+                            'source' => 'Pacman',
+                            'status' => 'Upgradable (from ' . $m[2] . ')',
+                        ];
+                    }
+                }
+            }
+        }
+
+        return array_slice($updates, 0, 30);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getScheduledTasks(): array
+    {
+        $tasks = [];
+
+        $crontabRaw = $this->readFile('/etc/crontab') ?? '';
+        if ($crontabRaw !== '') {
+            $lines = preg_split('/\r\n|\r|\n/', $crontabRaw) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#') || preg_match('/^[A-Z_]+=/', $line) === 1) {
+                    continue;
+                }
+
+                $parts = preg_split('/\s+/', $line, 7);
+                if (is_array($parts) && count($parts) === 7) {
+                    $scheduleExpr = implode(' ', array_slice($parts, 0, 5));
+                    $user = $parts[5];
+                    $command = $this->truncateLogMessage($parts[6], 55);
+
+                    $tasks[] = [
+                        'name' => $command,
+                        'schedule' => 'cron (' . $scheduleExpr . ')',
+                        'next_run' => 'User: ' . $user,
+                        'status' => 'Active',
+                    ];
+                }
+            }
+        }
+
+        $timersResult = $this->processRunner->run(['systemctl', 'list-timers', '--no-pager', '--no-legend']);
+        if ($timersResult->successful && $timersResult->output !== '') {
+            $lines = preg_split('/\r\n|\r|\n/', trim($timersResult->output)) ?: [];
+            foreach (array_slice($lines, 0, 20) as $line) {
+                $line = trim($line);
+                if ($line === '') {
+                    continue;
+                }
+                if (preg_match('/^(.+?)\s+([A-Za-z0-9_.-]+\.timer)\s+([A-Za-z0-9_.-]+\.service)$/i', $line, $m) === 1) {
+                    $tasks[] = [
+                        'name' => $m[2],
+                        'schedule' => 'systemd timer -> ' . $m[3],
+                        'next_run' => $this->truncateLogMessage(trim($m[1]), 35),
+                        'status' => 'Active',
+                    ];
+                }
+            }
+        }
+
+        return $tasks;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function runSecurityAudit(): array
+    {
+        $audit = [];
+
+        // 1. Firewall check (UFW / firewalld / nftables)
+        $fwActive = false;
+        $fwDetails = 'No active firewall service detected (ufw / firewalld / nftables)';
+
+        if ($this->commandExists('ufw')) {
+            $ufwRes = $this->processRunner->run(['ufw', 'status']);
+            if ($ufwRes->successful && str_contains(strtolower($ufwRes->output), 'status: active')) {
+                $fwActive = true;
+                $fwDetails = 'UFW Firewall is active';
+            }
+        }
+
+        if (! $fwActive) {
+            foreach (['firewalld', 'nftables'] as $fwDaemon) {
+                $res = $this->processRunner->run(['systemctl', 'is-active', $fwDaemon]);
+                if ($res->successful && trim($res->output) === 'active') {
+                    $fwActive = true;
+                    $fwDetails = $fwDaemon . ' daemon is active';
+                    break;
+                }
+            }
+        }
+
+        $audit[] = [
+            'component' => 'Linux Host Firewall',
+            'status' => $fwActive ? 'ENABLED' : 'WARNING',
+            'icon' => $fwActive ? '✅' : '⚠️',
+            'details' => $fwDetails,
+        ];
+
+        // 2. MAC / Antivirus check (AppArmor / SELinux / ClamAV)
+        $macActive = false;
+        $macDetails = [];
+
+        $appArmorParam = trim((string) ($this->readFile('/sys/module/apparmor/parameters/enabled') ?? ''));
+        if (strtoupper($appArmorParam) === 'Y') {
+            $macActive = true;
+            $macDetails[] = 'AppArmor: Enabled';
+        }
+
+        if ($this->commandExists('getenforce')) {
+            $seRes = $this->processRunner->run(['getenforce']);
+            $seMode = trim($seRes->output);
+            if (in_array(strtolower($seMode), ['enforcing', 'permissive'], true)) {
+                $macActive = true;
+                $macDetails[] = 'SELinux: ' . $seMode;
+            }
+        }
+
+        $audit[] = [
+            'component' => 'Mandatory Access Control (AppArmor / SELinux)',
+            'status' => $macActive ? 'PROTECTED' : 'WARNING',
+            'icon' => $macActive ? '✅' : '⚠️',
+            'details' => $macDetails !== [] ? implode(' | ', $macDetails) : 'Neither AppArmor nor SELinux reported active',
+        ];
+
+        // 3. SSH Root Login & Sudo Policy
+        $sshdConfig = $this->readFile('/etc/ssh/sshd_config') ?? '';
+        $rootLoginPermitted = preg_match('/^\s*PermitRootLogin\s+yes\b/im', $sshdConfig) === 1;
+
+        $audit[] = [
+            'component' => 'SSH & Root Privilege Policy',
+            'status' => $rootLoginPermitted ? 'WARNING' : 'HARDENED',
+            'icon' => $rootLoginPermitted ? '⚠️' : '✅',
+            'details' => $rootLoginPermitted
+                ? 'PermitRootLogin is set to "yes" in /etc/ssh/sshd_config'
+                : 'Direct SSH PermitRootLogin is restricted or disabled',
+        ];
+
+        return $audit;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getLocalUsersAudit(): array
+    {
+        $passwdRaw = $this->readFile('/etc/passwd') ?? '';
+        $groupRaw = $this->readFile('/etc/group') ?? '';
+
+        if ($passwdRaw === '') {
+            return [];
+        }
+
+        $adminUsers = ['root' => true];
+        foreach (preg_split('/\r\n|\r|\n/', $groupRaw) ?: [] as $gLine) {
+            $gParts = explode(':', trim($gLine));
+            if (count($gParts) >= 4 && in_array($gParts[0], ['sudo', 'wheel', 'admin', 'root'], true)) {
+                foreach (explode(',', $gParts[3]) as $member) {
+                    $member = trim($member);
+                    if ($member !== '') {
+                        $adminUsers[$member] = true;
+                    }
+                }
+            }
+        }
+
+        $users = [];
+        foreach (preg_split('/\r\n|\r|\n/', $passwdRaw) ?: [] as $pLine) {
+            $pLine = trim($pLine);
+            if ($pLine === '' || str_starts_with($pLine, '#')) {
+                continue;
+            }
+
+            $parts = explode(':', $pLine);
+            if (count($parts) < 7) {
+                continue;
+            }
+
+            $username = $parts[0];
+            $uid = (int) $parts[2];
+            $shell = $parts[6];
+
+            $isLoginShell = ! str_ends_with($shell, 'nologin') && ! str_ends_with($shell, '/false') && ! str_ends_with($shell, '/sync');
+            if ($uid !== 0 && $uid < 1000 && ! $isLoginShell) {
+                continue;
+            }
+
+            $isAdmin = $uid === 0 || isset($adminUsers[$username]);
+
+            $users[] = [
+                'username' => sprintf('%s (UID %d)', $username, $uid),
+                'status' => $isLoginShell ? '✅ Active (' . basename($shell) . ')' : '⚪ System/Locked',
+                'is_admin' => $isAdmin ? '⚠️ YES (sudo/root)' : 'No',
+                'last_logon' => $shell,
+            ];
+        }
+
+        return $users;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getNetworkShares(): array
+    {
+        $shares = [];
+
+        $smbConf = $this->readFile('/etc/samba/smb.conf') ?? '';
+        if ($smbConf !== '') {
+            $currentSection = null;
+            $currentPath = '-';
+            $currentComment = '-';
+
+            $lines = preg_split('/\r\n|\r|\n/', $smbConf) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
+                    continue;
+                }
+
+                if (preg_match('/^\[([^\]]+)\]$/', $line, $secMatch) === 1) {
+                    if ($currentSection !== null && strtolower($currentSection) !== 'global') {
+                        $shares[] = [
+                            'name' => $currentSection,
+                            'path' => $currentPath,
+                            'type' => 'Samba (SMB)',
+                            'description' => $currentComment,
+                        ];
+                    }
+                    $currentSection = trim($secMatch[1]);
+                    $currentPath = '-';
+                    $currentComment = '-';
+
+                    continue;
+                }
+
+                if ($currentSection !== null && str_contains($line, '=')) {
+                    [$k, $v] = array_map('trim', explode('=', $line, 2));
+                    if (strtolower($k) === 'path') {
+                        $currentPath = $v;
+                    } elseif (strtolower($k) === 'comment') {
+                        $currentComment = $v;
+                    }
+                }
+            }
+
+            if ($currentSection !== null && strtolower($currentSection) !== 'global') {
+                $shares[] = [
+                    'name' => $currentSection,
+                    'path' => $currentPath,
+                    'type' => 'Samba (SMB)',
+                    'description' => $currentComment,
+                ];
+            }
+        }
+
+        $exportsRaw = $this->readFile('/etc/exports') ?? '';
+        if ($exportsRaw !== '') {
+            $lines = preg_split('/\r\n|\r|\n/', $exportsRaw) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#')) {
+                    continue;
+                }
+
+                $parts = preg_split('/\s+/', $line, 2);
+                if (is_array($parts) && count($parts) === 2) {
+                    $shares[] = [
+                        'name' => basename($parts[0]) ?: $parts[0],
+                        'path' => $parts[0],
+                        'type' => 'NFS Export',
+                        'description' => $this->truncateLogMessage($parts[1], 55),
+                    ];
+                }
+            }
+        }
+
+        return $shares;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function getDefaultBrowserCachePaths(): array
+    {
+        $home = (string) (getenv('HOME') ?: '/root');
+        $cacheRoot = $home . '/.cache';
+
+        $paths = [
+            'Google Chrome (Cache)' => $cacheRoot . '/google-chrome/Default/Cache',
+            'Google Chrome (Code Cache)' => $cacheRoot . '/google-chrome/Default/Code Cache',
+            'Microsoft Edge (Cache)' => $cacheRoot . '/microsoft-edge/Default/Cache',
+            'Microsoft Edge (Code Cache)' => $cacheRoot . '/microsoft-edge/Default/Code Cache',
+        ];
+
+        $firefoxCache = $cacheRoot . '/mozilla/firefox';
+        if (is_dir($firefoxCache) && is_readable($firefoxCache)) {
+            foreach (glob($firefoxCache . '/*/cache2/entries') ?: [] as $idx => $ffDir) {
+                $paths['Mozilla Firefox (Profile ' . ($idx + 1) . ')'] = $ffDir;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function readHostsFileContent(): ?string
+    {
+        return $this->readFile('/etc/hosts');
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    protected function getDriverLabel(): string
+    {
+        return 'Linux';
     }
 
     /**
