@@ -7,6 +7,9 @@ return [
         'name' => 'IT Toolbox CLI',
         'tagline' => 'Cross-Platform IT Support & System Diagnostics Suite',
         'detected_os' => 'Detected OS Family: :os',
+        'header_status' => 'OS: :os  |  Privilege: :privilege  |  Lang: :lang',
+        'privilege_admin' => 'Admin / Root',
+        'privilege_user' => 'Standard User',
         'goodbye' => 'Thank you for using IT Toolbox CLI. Goodbye!',
     ],
 
@@ -21,6 +24,9 @@ return [
     'menu' => [
         'main_prompt' => 'Select a module or action:',
         'sub_prompt' => 'Select an operation:',
+        'numeric_hint' => 'Enter an option number (:options)',
+        'invalid_option' => 'Invalid option. Please enter one of the available numbers (:options).',
+        'press_any_key' => 'Press Enter or any key to return...',
         'back' => '← Back to Main Menu',
         'exit' => '✖ Exit IT Toolbox',
         'categories' => [
@@ -28,8 +34,8 @@ return [
             'printers' => '🖨  Printers & Spooler Management',
             'network' => '🌐 Network & Connectivity Diagnostics',
             'maintenance' => '🧹 System Maintenance & Cleanup',
-            'reports' => '📄 Diagnostic Reports & Export',
-            'language' => '🌍 Switch Language (English / Português)',
+            'reports' => '📄 Export Diagnostic Report',
+            'language' => '🌍 Switch Language (EN / PT-BR)',
         ],
         'actions' => [
             'system_info' => 'View OS, CPU, RAM & Storage Health (system:info)',
