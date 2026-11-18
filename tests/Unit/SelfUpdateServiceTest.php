@@ -40,12 +40,16 @@ it('downloads and atomically replaces the executable (with .old backup on Window
     $fakeExePath = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox-windows-x64.exe';
     file_put_contents($fakeExePath, 'OLD_BINARY_PAYLOAD');
 
+    $newBinaryPayload = 'NEW_BINARY_PAYLOAD_V1_3_0' . str_repeat('X', 520 * 1024);
+    $expectedSize = strlen($newBinaryPayload);
+
     $fakeReleaseJson = (string) json_encode([
         'tag_name' => 'v1.3.0',
         'html_url' => 'https://github.com/Dev-lib4n/it-toolbox-cli/releases/tag/v1.3.0',
         'assets' => [
             [
                 'name' => 'it-toolbox-windows-x64.exe',
+                'size' => $expectedSize,
                 'browser_download_url' => 'https://github.com/Dev-lib4n/it-toolbox-cli/releases/download/v1.3.0/it-toolbox-windows-x64.exe',
             ],
         ],
@@ -54,7 +58,7 @@ it('downloads and atomically replaces the executable (with .old backup on Window
     $service = new SelfUpdateService(
         httpFetcher: fn (string $url): string => str_contains($url, 'api.github.com')
             ? $fakeReleaseJson
-            : 'NEW_BINARY_PAYLOAD_V1_3_0',
+            : $newBinaryPayload,
         currentVersion: '1.2.0',
         runningBinaryPath: $fakeExePath,
         osFamily: 'Windows',
@@ -65,17 +69,98 @@ it('downloads and atomically replaces the executable (with .old backup on Window
         expect($check['success'])->toBeTrue()
             ->and($check['update_available'])->toBeTrue()
             ->and($check['latest_version'])->toBe('1.3.0')
-            ->and($check['asset_name'])->toBe('it-toolbox-windows-x64.exe');
+            ->and($check['asset_name'])->toBe('it-toolbox-windows-x64.exe')
+            ->and($check['asset_size'])->toBe($expectedSize);
 
         $updateResult = $service->performUpdate();
         expect($updateResult->success)->toBeTrue()
             ->and($updateResult->message)->toBe('messages.update.updated_success')
-            ->and(file_get_contents($fakeExePath))->toBe('NEW_BINARY_PAYLOAD_V1_3_0')
+            ->and($service->wasBinaryReplaced())->toBeTrue()
+            ->and(file_get_contents($fakeExePath))->toBe($newBinaryPayload)
             ->and(file_exists($fakeExePath . '.old'))->toBeTrue()
             ->and(file_get_contents($fakeExePath . '.old'))->toBe('OLD_BINARY_PAYLOAD');
     } finally {
         @unlink($fakeExePath);
         @unlink($fakeExePath . '.old');
+        @unlink($fakeExePath . '.download.tmp');
+        @rmdir($tempDir);
+    }
+});
+
+it('rejects downloaded binaries whose byte size differs from the GitHub asset metadata', function (): void {
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_truncated_' . uniqid();
+    mkdir($tempDir, 0777, true);
+    $fakeExePath = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox-windows-x64.exe';
+    file_put_contents($fakeExePath, 'ORIGINAL_HEALTHY_BINARY');
+
+    $truncatedPayload = str_repeat('Z', 530 * 1024);
+    $expectedAssetSize = 650 * 1024;
+
+    $fakeReleaseJson = (string) json_encode([
+        'tag_name' => 'v1.4.0',
+        'assets' => [
+            [
+                'name' => 'it-toolbox-windows-x64.exe',
+                'size' => $expectedAssetSize,
+                'browser_download_url' => 'https://github.com/Dev-lib4n/it-toolbox-cli/releases/download/v1.4.0/it-toolbox-windows-x64.exe',
+            ],
+        ],
+    ]);
+
+    $service = new SelfUpdateService(
+        httpFetcher: fn (string $url): string => str_contains($url, 'api.github.com')
+            ? $fakeReleaseJson
+            : $truncatedPayload,
+        currentVersion: '1.3.0',
+        runningBinaryPath: $fakeExePath,
+        osFamily: 'Windows',
+    );
+
+    try {
+        expect(fn () => $service->performUpdate())->toThrow(RuntimeException::class)
+            ->and($service->wasBinaryReplaced())->toBeFalse()
+            ->and(file_get_contents($fakeExePath))->toBe('ORIGINAL_HEALTHY_BINARY')
+            ->and(file_exists($fakeExePath . '.download.tmp'))->toBeFalse();
+    } finally {
+        @unlink($fakeExePath);
+        @unlink($fakeExePath . '.old');
+        @unlink($fakeExePath . '.download.tmp');
+        @rmdir($tempDir);
+    }
+});
+
+it('rejects suspiciously small downloaded payloads below 500 KB and removes temp artifacts', function (): void {
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_small_' . uniqid();
+    mkdir($tempDir, 0777, true);
+    $fakeExePath = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox-linux-x64';
+    file_put_contents($fakeExePath, 'ORIGINAL_ELF_BINARY');
+
+    $fakeReleaseJson = (string) json_encode([
+        'tag_name' => 'v1.4.0',
+        'assets' => [
+            [
+                'name' => 'it-toolbox-linux-x64',
+                'browser_download_url' => 'https://github.com/Dev-lib4n/it-toolbox-cli/releases/download/v1.4.0/it-toolbox-linux-x64',
+            ],
+        ],
+    ]);
+
+    $service = new SelfUpdateService(
+        httpFetcher: fn (string $url): string => str_contains($url, 'api.github.com')
+            ? $fakeReleaseJson
+            : 'HTML_ERROR_OR_TRUNCATED_BODY',
+        currentVersion: '1.3.0',
+        runningBinaryPath: $fakeExePath,
+        osFamily: 'Linux',
+    );
+
+    try {
+        expect(fn () => $service->performUpdate())->toThrow(RuntimeException::class)
+            ->and($service->wasBinaryReplaced())->toBeFalse()
+            ->and(file_get_contents($fakeExePath))->toBe('ORIGINAL_ELF_BINARY')
+            ->and(file_exists($fakeExePath . '.download.tmp'))->toBeFalse();
+    } finally {
+        @unlink($fakeExePath);
         @unlink($fakeExePath . '.download.tmp');
         @rmdir($tempDir);
     }

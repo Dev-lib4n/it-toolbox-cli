@@ -6,6 +6,7 @@ namespace App\Commands;
 
 use App\Commands\Concerns\InteractsWithLocale;
 use App\Commands\Concerns\InteractsWithTerminal;
+use App\Services\SelfUpdateService;
 use Laravel\Prompts\Prompt;
 use LaravelZero\Framework\Commands\Command;
 use Symfony\Component\Process\Process;
@@ -150,6 +151,9 @@ class ToolboxMenuCommand extends Command
                 $this->executeSubcommand('health:check', $locale);
             } elseif ($choice === '8') {
                 $this->executeSubcommand('self:update', $locale);
+                if (app(SelfUpdateService::class)->wasBinaryReplaced()) {
+                    return self::SUCCESS;
+                }
             } elseif ($choice === '9') {
                 $locale = $this->promptNumericLanguageSwitch($locale);
             } else {
@@ -164,6 +168,9 @@ class ToolboxMenuCommand extends Command
                 };
 
                 $this->handleCategorySubmenu($category, $locale);
+                if (app(SelfUpdateService::class)->wasBinaryReplaced()) {
+                    return self::SUCCESS;
+                }
             }
 
             if ($this->option('once')) {
@@ -257,7 +264,7 @@ class ToolboxMenuCommand extends Command
 
             $this->executeSubcommand($actionsMap[$choice]['command'], $locale);
 
-            if ($this->option('once')) {
+            if (app(SelfUpdateService::class)->wasBinaryReplaced() || $this->option('once')) {
                 return;
             }
         }
@@ -286,6 +293,10 @@ class ToolboxMenuCommand extends Command
             error(sprintf('[%s] %s', $command, $exception->getMessage()));
         } finally {
             $this->restoreTerminal();
+        }
+
+        if ($command === 'self:update' && app(SelfUpdateService::class)->wasBinaryReplaced()) {
+            return;
         }
 
         $this->pauseBeforeReturn();

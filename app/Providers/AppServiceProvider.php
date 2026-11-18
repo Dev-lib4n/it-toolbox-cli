@@ -37,6 +37,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->singleton(SelfUpdateService::class, fn (): SelfUpdateService => new SelfUpdateService());
         $this->registerTranslator();
         $this->registerSystemDriver();
     }

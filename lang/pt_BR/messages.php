@@ -272,6 +272,7 @@ return [
         'available' => 'Nova versão disponível! Atual: v:current -> Mais recente: v:latest',
         'confirm_download' => 'Deseja baixar e instalar a versão v:version (:asset) agora?',
         'updated_success' => 'O IT Toolbox CLI foi atualizado com sucesso!',
+        'restart_notice' => 'Reinicie o it-toolbox para utilizar a nova versão (v:version).',
         'check_failed' => 'Não foi possível verificar atualizações no GitHub Releases. Verifique sua conexão.',
         'asset_not_found' => 'O artefato correspondente à sua plataforma não foi encontrado na última Release.',
         'download_failed' => 'Falha ao baixar o binário atualizado do GitHub.',
