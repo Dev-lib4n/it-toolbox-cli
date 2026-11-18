@@ -29,7 +29,7 @@ class ListPrintersCommand extends Command
      *
      * @var string
      */
-    protected $description = 'List installed printers and their current status';
+    protected $description = 'List installed printers, port/IP, driver, status, and pending jobs';
 
     /**
      * Execute the console command.
@@ -38,7 +38,7 @@ class ListPrintersCommand extends Command
     {
         $this->resolveLocale();
 
-        /** @var array<int, array{name: string, status: string, default: string, driver: string, port: string}> $printers */
+        /** @var array<int, array{name: string, status: string, default: string, driver: string, port: string, jobs?: string}> $printers */
         $printers = spin(
             callback: fn (): array => $driver->listPrinters(),
             message: (string) __('messages.spinners.printer_list'),
@@ -55,18 +55,20 @@ class ListPrintersCommand extends Command
         table(
             headers: [
                 (string) __('messages.printer.headers.name'),
-                (string) __('messages.printer.headers.status'),
-                (string) __('messages.printer.headers.default'),
-                (string) __('messages.printer.headers.driver'),
                 (string) __('messages.printer.headers.port'),
+                (string) __('messages.printer.headers.driver'),
+                (string) __('messages.printer.headers.status'),
+                (string) __('messages.printer.headers.jobs'),
+                (string) __('messages.printer.headers.default'),
             ],
             rows: array_map(
                 fn (array $printer): array => [
                     $printer['name'] ?? '-',
-                    $printer['status'] ?? '-',
-                    $printer['default'] ?? '-',
-                    $printer['driver'] ?? '-',
                     $printer['port'] ?? '-',
+                    $printer['driver'] ?? '-',
+                    $printer['status'] ?? '-',
+                    (string) ($printer['jobs'] ?? '0'),
+                    $printer['default'] ?? '-',
                 ],
                 $printers
             ),

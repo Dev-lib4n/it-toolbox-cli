@@ -4,23 +4,71 @@ declare(strict_types=1);
 
 namespace App\Drivers;
 
+use App\Contracts\ProcessRunnerInterface;
 use App\Contracts\SystemDriverInterface;
 use App\DTOs\ActionResult;
+use App\DTOs\ProcessResult;
+use App\Services\SymfonyProcessRunner;
 
 class WindowsDriver implements SystemDriverInterface
 {
+    private const UTF8_PREAMBLE = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; ';
+
+    public function __construct(
+        private readonly ProcessRunnerInterface $processRunner = new SymfonyProcessRunner(),
+    ) {}
+
     /**
      * {@inheritDoc}
      */
     public function getOsInfo(): array
     {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$os = Get-CimInstance -ClassName Win32_OperatingSystem;
+if ($null -eq $os) { exit 1 }
+$uptime = (Get-Date) - $os.LastBootUpTime;
+[PSCustomObject]@{
+    Caption = [string]$os.Caption;
+    Version = [string]$os.Version;
+    BuildNumber = [string]$os.BuildNumber;
+    OSArchitecture = [string]$os.OSArchitecture;
+    CSName = [string]$os.CSName;
+    Days = [int]$uptime.Days;
+    Hours = [int]$uptime.Hours;
+    Minutes = [int]$uptime.Minutes
+} | ConvertTo-Json -Compress
+PS;
+
+        $data = $this->runPowerShellJson($script);
+
+        if ($data === []) {
+            return [
+                'os_name' => 'Windows (Unknown)',
+                'os_version' => php_uname('r'),
+                'kernel' => 'NT',
+                'architecture' => php_uname('m'),
+                'hostname' => gethostname() ?: 'UNKNOWN',
+                'uptime' => 'N/A',
+            ];
+        }
+
+        $version = trim((string) ($data['Version'] ?? ''));
+        $build = trim((string) ($data['BuildNumber'] ?? ''));
+        $formattedVersion = $build !== '' ? sprintf('%s (Build %s)', $version, $build) : $version;
+
         return [
-            'os_name' => 'Microsoft Windows 11 Pro (Stub)',
-            'os_version' => '10.0.22631 Build 22631',
-            'kernel' => 'NT 10.0',
-            'architecture' => 'x86_64 (64-bit)',
-            'hostname' => gethostname() ?: 'WIN-WORKSTATION',
-            'uptime' => '2 days, 4 hours, 15 minutes',
+            'os_name' => trim((string) ($data['Caption'] ?? 'Microsoft Windows')),
+            'os_version' => $formattedVersion !== '' ? $formattedVersion : 'N/A',
+            'kernel' => $version !== '' ? sprintf('NT %s', $version) : 'Windows NT',
+            'architecture' => trim((string) ($data['OSArchitecture'] ?? php_uname('m'))),
+            'hostname' => trim((string) ($data['CSName'] ?? (gethostname() ?: 'UNKNOWN'))),
+            'uptime' => sprintf(
+                '%dd %dh %dm',
+                (int) ($data['Days'] ?? 0),
+                (int) ($data['Hours'] ?? 0),
+                (int) ($data['Minutes'] ?? 0)
+            ),
         ];
     }
 
@@ -29,13 +77,53 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function getHardwareDiagnostics(): array
     {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$cpus = @(Get-CimInstance -ClassName Win32_Processor);
+$os = Get-CimInstance -ClassName Win32_OperatingSystem;
+if ($cpus.Count -eq 0 -and $null -eq $os) { exit 1 }
+$firstCpu = $cpus | Select-Object -First 1;
+$avgLoad = ($cpus | Measure-Object -Property LoadPercentage -Average).Average;
+$cores = ($cpus | Measure-Object -Property NumberOfCores -Sum).Sum;
+$threads = ($cpus | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum;
+[PSCustomObject]@{
+    CpuName = [string]$firstCpu.Name;
+    Cores = [int]$cores;
+    Threads = [int]$threads;
+    CpuLoad = [double]$avgLoad;
+    TotalVisibleMemorySize = [double]$os.TotalVisibleMemorySize;
+    FreePhysicalMemory = [double]$os.FreePhysicalMemory
+} | ConvertTo-Json -Compress
+PS;
+
+        $data = $this->runPowerShellJson($script);
+
+        if ($data === []) {
+            return [
+                'cpu_model' => 'Unknown Processor',
+                'cpu_cores' => 'N/A',
+                'cpu_load' => 'N/A',
+                'ram_total' => 'N/A',
+                'ram_used' => 'N/A',
+                'ram_free' => 'N/A',
+            ];
+        }
+
+        // Win32_OperatingSystem reports memory in Kilobytes (KB).
+        $totalBytes = ((float) ($data['TotalVisibleMemorySize'] ?? 0.0)) * 1024.0;
+        $freeBytes = ((float) ($data['FreePhysicalMemory'] ?? 0.0)) * 1024.0;
+        $usedBytes = max(0.0, $totalBytes - $freeBytes);
+
+        $usedPercent = $totalBytes > 0.0 ? round(($usedBytes / $totalBytes) * 100.0, 1) : 0.0;
+        $freePercent = $totalBytes > 0.0 ? round(($freeBytes / $totalBytes) * 100.0, 1) : 0.0;
+
         return [
-            'cpu_model' => 'Intel(R) Core(TM) i7-13700K @ 3.40GHz',
-            'cpu_cores' => '16 Cores / 24 Logical Processors',
-            'cpu_load' => '14%',
-            'ram_total' => '32.00 GB',
-            'ram_used' => '12.40 GB (38.8%)',
-            'ram_free' => '19.60 GB',
+            'cpu_model' => trim((string) ($data['CpuName'] ?? 'Unknown CPU')),
+            'cpu_cores' => sprintf('%d Cores / %d Logical Processors', (int) ($data['Cores'] ?? 0), (int) ($data['Threads'] ?? 0)),
+            'cpu_load' => sprintf('%.1f%%', (float) ($data['CpuLoad'] ?? 0.0)),
+            'ram_total' => $this->formatBytes($totalBytes),
+            'ram_used' => sprintf('%s (%.1f%%)', $this->formatBytes($usedBytes), $usedPercent),
+            'ram_free' => sprintf('%s (%.1f%%)', $this->formatBytes($freeBytes), $freePercent),
         ];
     }
 
@@ -44,24 +132,49 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function getStorageHealth(): array
     {
-        return [
-            [
-                'filesystem' => 'C: (NTFS)',
-                'total' => '931.51 GB',
-                'used' => '412.20 GB',
-                'available' => '519.31 GB',
-                'usage_percent' => '44.2%',
-                'mount' => 'C:\\',
-            ],
-            [
-                'filesystem' => 'D: (NTFS)',
-                'total' => '1863.02 GB',
-                'used' => '750.00 GB',
-                'available' => '1113.02 GB',
-                'usage_percent' => '40.3%',
-                'mount' => 'D:\\',
-            ],
-        ];
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+    [PSCustomObject]@{
+        DeviceID = [string]$_.DeviceID;
+        VolumeName = [string]$_.VolumeName;
+        FileSystem = [string]$_.FileSystem;
+        Size = [double]$_.Size;
+        FreeSpace = [double]$_.FreeSpace
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $disks = [];
+        foreach ($items as $disk) {
+            if (! is_array($disk)) {
+                continue;
+            }
+
+            $deviceId = trim((string) ($disk['DeviceID'] ?? 'C:'));
+            $fileSystem = trim((string) ($disk['FileSystem'] ?? 'NTFS'));
+            $totalBytes = (float) ($disk['Size'] ?? 0.0);
+            $freeBytes = (float) ($disk['FreeSpace'] ?? 0.0);
+            $usedBytes = max(0.0, $totalBytes - $freeBytes);
+            $usagePercent = $totalBytes > 0.0 ? round(($usedBytes / $totalBytes) * 100.0, 1) : 0.0;
+
+            $usageLabel = $usagePercent > 85.0
+                ? sprintf('⚠️ %.1f%% [HIGH]', $usagePercent)
+                : sprintf('%.1f%%', $usagePercent);
+
+            $disks[] = [
+                'filesystem' => $fileSystem !== '' ? sprintf('%s (%s)', $deviceId, $fileSystem) : $deviceId,
+                'total' => $this->formatBytes($totalBytes),
+                'used' => $this->formatBytes($usedBytes),
+                'available' => $this->formatBytes($freeBytes),
+                'usage_percent' => $usageLabel,
+                'mount' => rtrim($deviceId, '\\') . '\\',
+            ];
+        }
+
+        return $disks;
     }
 
     /**
@@ -69,15 +182,43 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function getTopProcesses(int $limit = 10): array
     {
-        $processes = [
-            ['pid' => 4120, 'name' => 'chrome.exe', 'cpu' => '8.4%', 'memory' => '1,240 MB'],
-            ['pid' => 8832, 'name' => 'php.exe', 'cpu' => '3.1%', 'memory' => '64 MB'],
-            ['pid' => 1540, 'name' => 'explorer.exe', 'cpu' => '1.8%', 'memory' => '210 MB'],
-            ['pid' => 2912, 'name' => 'spoolsv.exe', 'cpu' => '0.4%', 'memory' => '42 MB'],
-            ['pid' => 6420, 'name' => 'svchost.exe', 'cpu' => '0.2%', 'memory' => '95 MB'],
-        ];
+        $safeLimit = max(1, $limit);
 
-        return array_slice($processes, 0, $limit);
+        $script = sprintf(
+            <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First %d | ForEach-Object {
+    [PSCustomObject]@{
+        Id = [int]$_.Id;
+        ProcessName = [string]$_.ProcessName;
+        WorkingSet64 = [double]$_.WorkingSet64;
+        CPU = [double]($_.CPU -as [double])
+    }
+}) | ConvertTo-Json -Compress
+PS,
+            $safeLimit
+        );
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $processes = [];
+        foreach ($items as $proc) {
+            if (! is_array($proc)) {
+                continue;
+            }
+
+            $memoryMb = ((float) ($proc['WorkingSet64'] ?? 0.0)) / 1048576.0;
+            $cpuSeconds = (float) ($proc['CPU'] ?? 0.0);
+
+            $processes[] = [
+                'pid' => (int) ($proc['Id'] ?? 0),
+                'name' => trim((string) ($proc['ProcessName'] ?? 'unknown')),
+                'cpu' => sprintf('%.2f s', $cpuSeconds),
+                'memory' => sprintf('%.2f MB', $memoryMb),
+            ];
+        }
+
+        return array_slice($processes, 0, $safeLimit);
     }
 
     /**
@@ -85,11 +226,39 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function killProcess(int $pid): ActionResult
     {
+        if ($pid <= 0) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.process_killed_failed',
+                details: ['pid' => $pid, 'driver' => 'Windows'],
+            );
+        }
+
+        $script = sprintf('Stop-Process -Id %d -Force -ErrorAction Stop', $pid);
+        $result = $this->runPowerShell($script);
+
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.process_killed_success',
+                details: [
+                    'pid' => $pid,
+                    'driver' => 'Windows',
+                ],
+            );
+        }
+
+        $errorMessage = $result->errorOutput !== '' ? $result->errorOutput : $result->output;
+        $isPermissionDenied = $this->isPermissionDeniedError($errorMessage);
+
         return new ActionResult(
-            success: true,
-            message: 'messages.system.process_killed_success',
+            success: false,
+            message: $isPermissionDenied
+                ? 'messages.common.permission_denied'
+                : 'messages.system.process_killed_failed',
             details: [
                 'pid' => $pid,
+                'error' => $errorMessage !== '' ? $errorMessage : 'Stop-Process failed',
                 'driver' => 'Windows',
             ],
         );
@@ -100,22 +269,43 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function listPrinters(): array
     {
-        return [
-            [
-                'name' => 'HP LaserJet Pro MFP M428f-M429f',
-                'status' => 'Idle',
-                'default' => 'Yes',
-                'driver' => 'HP Universal Printing PCL 6',
-                'port' => 'IP_192.168.1.50',
-            ],
-            [
-                'name' => 'Microsoft Print to PDF',
-                'status' => 'Idle',
-                'default' => 'No',
-                'driver' => 'Microsoft Print To PDF',
-                'port' => 'PORTPROMPT:',
-            ],
-        ];
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-Printer | ForEach-Object {
+    $jobs = @(Get-PrintJob -PrinterName $_.Name -ErrorAction SilentlyContinue);
+    [PSCustomObject]@{
+        Name = [string]$_.Name;
+        PortName = [string]$_.PortName;
+        DriverName = [string]$_.DriverName;
+        PrinterStatus = [string]$_.PrinterStatus;
+        Default = [bool]$_.Default;
+        JobCount = [int]$jobs.Count
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $printers = [];
+        foreach ($items as $printer) {
+            if (! is_array($printer)) {
+                continue;
+            }
+
+            $rawStatus = trim((string) ($printer['PrinterStatus'] ?? 'Normal'));
+            $jobCount = (int) ($printer['JobCount'] ?? 0);
+
+            $printers[] = [
+                'name' => trim((string) ($printer['Name'] ?? 'Unknown Printer')),
+                'status' => sprintf('%s (%d jobs)', $this->normalizePrinterStatus($rawStatus), $jobCount),
+                'default' => ! empty($printer['Default']) ? 'Yes' : 'No',
+                'driver' => trim((string) ($printer['DriverName'] ?? '-')),
+                'port' => trim((string) ($printer['PortName'] ?? '-')),
+                'jobs' => (string) $jobCount,
+            ];
+        }
+
+        return $printers;
     }
 
     /**
@@ -123,12 +313,88 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function clearPrintQueue(): ActionResult
     {
+        $script = <<<'PS'
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator);
+if (-not $isAdmin) {
+    [PSCustomObject]@{
+        IsAdmin = $false;
+        Success = $false;
+        DeletedFiles = 0;
+        Error = 'Administrator privileges are required to manage the Print Spooler service.'
+    } | ConvertTo-Json -Compress;
+    exit 0;
+}
+try {
+    Stop-Service -Name Spooler -Force -ErrorAction Stop;
+    $spoolDir = Join-Path $env:SystemRoot 'System32\spool\PRINTERS';
+    $deleted = 0;
+    if (Test-Path -LiteralPath $spoolDir) {
+        $items = @(Get-ChildItem -LiteralPath $spoolDir -Force -ErrorAction SilentlyContinue);
+        foreach ($item in $items) {
+            Remove-Item -LiteralPath $item.FullName -Force -Recurse -ErrorAction SilentlyContinue;
+            if (-not (Test-Path -LiteralPath $item.FullName)) {
+                $deleted++;
+            }
+        }
+    }
+    Start-Service -Name Spooler -ErrorAction Stop;
+    [PSCustomObject]@{
+        IsAdmin = $true;
+        Success = $true;
+        DeletedFiles = [int]$deleted;
+        Error = ''
+    } | ConvertTo-Json -Compress;
+} catch {
+    Start-Service -Name Spooler -ErrorAction SilentlyContinue;
+    [PSCustomObject]@{
+        IsAdmin = $true;
+        Success = $false;
+        DeletedFiles = 0;
+        Error = [string]$_.Exception.Message
+    } | ConvertTo-Json -Compress;
+}
+PS;
+
+        $data = $this->runPowerShellJson($script);
+
+        if ($data === []) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.printer.queue_cleared_failed',
+                details: ['service' => 'Spooler', 'driver' => 'Windows'],
+            );
+        }
+
+        if (($data['IsAdmin'] ?? false) === false) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.common.permission_denied',
+                details: [
+                    'service' => 'Spooler',
+                    'error' => (string) ($data['Error'] ?? 'Access denied'),
+                    'driver' => 'Windows',
+                ],
+            );
+        }
+
+        if (($data['Success'] ?? false) === true) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.printer.queue_cleared_success',
+                details: [
+                    'service' => 'Spooler',
+                    'deleted_files' => (int) ($data['DeletedFiles'] ?? 0),
+                    'driver' => 'Windows',
+                ],
+            );
+        }
+
         return new ActionResult(
-            success: true,
-            message: 'messages.printer.queue_cleared_success',
+            success: false,
+            message: 'messages.printer.queue_cleared_failed',
             details: [
                 'service' => 'Spooler',
-                'deleted_files' => 3,
+                'error' => (string) ($data['Error'] ?? 'Failed to restart Spooler'),
                 'driver' => 'Windows',
             ],
         );
@@ -139,22 +405,48 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function getNetworkInterfaces(): array
     {
-        return [
-            [
-                'interface' => 'Ethernet',
-                'ipv4' => '192.168.1.105/24',
-                'ipv6' => 'fe80::1a2b:3c4d:5e6f:7a8b',
-                'mac' => '00-1A-2B-3C-4D-5E',
-                'status' => 'Up',
-            ],
-            [
-                'interface' => 'Wi-Fi',
-                'ipv4' => '192.168.1.106/24',
-                'ipv6' => 'fe80::9b8a:7f6e:5d4c:3b2a',
-                'mac' => '00-1A-2B-3C-4D-5F',
-                'status' => 'Up',
-            ],
-        ];
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-NetIPConfiguration | ForEach-Object {
+    $ipv4 = ($_.IPv4Address | Select-Object -First 1).IPAddress;
+    $ipv6 = ($_.IPv6Address | Select-Object -First 1).IPAddress;
+    $gw = ($_.IPv4DefaultGateway | Select-Object -First 1).NextHop;
+    $dns = @($_.DNSServer | Where-Object { $_.AddressFamily -eq 2 } | Select-Object -ExpandProperty ServerAddresses) -join ', ';
+    if ([string]::IsNullOrWhiteSpace($dns)) {
+        $dns = @($_.DNSServer.ServerAddresses) -join ', ';
+    }
+    [PSCustomObject]@{
+        InterfaceAlias = [string]$_.InterfaceAlias;
+        IPv4 = [string]$ipv4;
+        IPv6 = [string]$ipv6;
+        Gateway = [string]$gw;
+        DnsServers = [string]$dns;
+        MacAddress = [string]$_.NetAdapter.MacAddress;
+        Status = [string]$_.NetAdapter.Status
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $interfaces = [];
+        foreach ($items as $iface) {
+            if (! is_array($iface)) {
+                continue;
+            }
+
+            $interfaces[] = [
+                'interface' => trim((string) ($iface['InterfaceAlias'] ?? 'Unknown')),
+                'ipv4' => trim((string) ($iface['IPv4'] ?? '')) ?: '-',
+                'ipv6' => trim((string) ($iface['IPv6'] ?? '')) ?: '-',
+                'gateway' => trim((string) ($iface['Gateway'] ?? '')) ?: '-',
+                'dns' => trim((string) ($iface['DnsServers'] ?? '')) ?: '-',
+                'mac' => trim((string) ($iface['MacAddress'] ?? '')) ?: '-',
+                'status' => trim((string) ($iface['Status'] ?? '')) ?: 'Unknown',
+            ];
+        }
+
+        return $interfaces;
     }
 
     /**
@@ -162,32 +454,93 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function runConnectivityHealthCheck(): array
     {
-        return [
-            [
-                'target' => '192.168.1.1 (Default Gateway)',
-                'check' => 'ICMP Ping',
-                'status' => 'OK',
-                'latency' => '1 ms',
-            ],
-            [
-                'target' => '8.8.8.8 (Google Public DNS)',
-                'check' => 'ICMP Ping',
-                'status' => 'OK',
-                'latency' => '14 ms',
-            ],
-            [
-                'target' => '1.1.1.1 (Cloudflare DNS)',
-                'check' => 'ICMP Ping',
-                'status' => 'OK',
-                'latency' => '11 ms',
-            ],
-            [
-                'target' => 'cloudflare.com',
-                'check' => 'DNS Resolution',
-                'status' => 'OK',
-                'latency' => '18 ms',
-            ],
-        ];
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$results = @();
+
+# 1. Active Network Adapter check
+$cfg = Get-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' -and $null -ne $_.IPv4DefaultGateway } | Select-Object -First 1;
+if ($null -eq $cfg) {
+    $cfg = Get-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1;
+}
+
+if ($null -ne $cfg) {
+    $results += [PSCustomObject]@{
+        Target = [string]$cfg.InterfaceAlias;
+        Check = 'Active Adapter';
+        Status = 'OK';
+        Latency = '<1 ms'
+    };
+} else {
+    $results += [PSCustomObject]@{
+        Target = 'Network Adapter';
+        Check = 'Active Adapter';
+        Status = 'FAIL';
+        Latency = '-'
+    };
+}
+
+# 2. Ping Default Gateway
+$gateway = if ($null -ne $cfg -and $null -ne $cfg.IPv4DefaultGateway) { [string]($cfg.IPv4DefaultGateway | Select-Object -First 1).NextHop } else { '' };
+if (-not [string]::IsNullOrWhiteSpace($gateway)) {
+    $gwPing = Test-Connection -ComputerName $gateway -Count 1 -ErrorAction SilentlyContinue | Select-Object -First 1;
+    $gwLatency = if ($null -ne $gwPing.ResponseTime) { "$($gwPing.ResponseTime) ms" } elseif ($null -ne $gwPing.Latency) { "$($gwPing.Latency) ms" } else { '-' };
+    $results += [PSCustomObject]@{
+        Target = "$gateway (Gateway)";
+        Check = 'ICMP Ping';
+        Status = if ($null -ne $gwPing) { 'OK' } else { 'FAIL' };
+        Latency = $gwLatency
+    };
+} else {
+    $results += [PSCustomObject]@{
+        Target = 'Default Gateway';
+        Check = 'ICMP Ping';
+        Status = 'FAIL';
+        Latency = '-'
+    };
+}
+
+# 3. Ping External 1.1.1.1
+$extPing = Test-Connection -ComputerName '1.1.1.1' -Count 1 -ErrorAction SilentlyContinue | Select-Object -First 1;
+$extLatency = if ($null -ne $extPing.ResponseTime) { "$($extPing.ResponseTime) ms" } elseif ($null -ne $extPing.Latency) { "$($extPing.Latency) ms" } else { '-' };
+$results += [PSCustomObject]@{
+    Target = '1.1.1.1 (Cloudflare)';
+    Check = 'External Ping';
+    Status = if ($null -ne $extPing) { 'OK' } else { 'FAIL' };
+    Latency = $extLatency
+};
+
+# 4. DNS Resolution (google.com)
+$sw = [System.Diagnostics.Stopwatch]::StartNew();
+$dnsResolved = Resolve-DnsName -Name 'google.com' -Type A -ErrorAction SilentlyContinue | Select-Object -First 1;
+$sw.Stop();
+$results += [PSCustomObject]@{
+    Target = 'google.com';
+    Check = 'DNS Resolution';
+    Status = if ($null -ne $dnsResolved) { 'OK' } else { 'FAIL' };
+    Latency = if ($null -ne $dnsResolved) { "$($sw.ElapsedMilliseconds) ms" } else { '-' }
+};
+
+$results | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $checks = [];
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $checks[] = [
+                'target' => trim((string) ($item['Target'] ?? '-')),
+                'check' => trim((string) ($item['Check'] ?? '-')),
+                'status' => trim((string) ($item['Status'] ?? 'FAIL')),
+                'latency' => trim((string) ($item['Latency'] ?? '-')),
+            ];
+        }
+
+        return $checks;
     }
 
     /**
@@ -195,11 +548,27 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function flushDnsAndRenew(): ActionResult
     {
+        $result = $this->processRunner->run(['ipconfig', '/flushdns']);
+        $cleanOutput = $this->normalizeConsoleOutput($result->output ?: $result->errorOutput);
+
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.network.flush_success',
+                details: [
+                    'commands_executed' => ['ipconfig /flushdns'],
+                    'output' => $cleanOutput !== '' ? $cleanOutput : 'Successfully flushed the DNS Resolver Cache.',
+                    'driver' => 'Windows',
+                ],
+            );
+        }
+
         return new ActionResult(
-            success: true,
-            message: 'messages.network.flush_success',
+            success: false,
+            message: 'messages.network.flush_failed',
             details: [
-                'commands_executed' => ['ipconfig /flushdns', 'ipconfig /release', 'ipconfig /renew'],
+                'commands_executed' => ['ipconfig /flushdns'],
+                'error' => $cleanOutput !== '' ? $cleanOutput : 'Failed to flush DNS cache.',
                 'driver' => 'Windows',
             ],
         );
@@ -210,29 +579,41 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function getListeningPorts(): array
     {
-        return [
-            [
-                'protocol' => 'TCP',
-                'local_address' => '0.0.0.0',
-                'port' => '80',
-                'pid' => '4512',
-                'process' => 'nginx.exe',
-            ],
-            [
-                'protocol' => 'TCP',
-                'local_address' => '127.0.0.1',
-                'port' => '3306',
-                'pid' => '5120',
-                'process' => 'mysqld.exe',
-            ],
-            [
-                'protocol' => 'TCP',
-                'local_address' => '0.0.0.0',
-                'port' => '445',
-                'pid' => '4',
-                'process' => 'System',
-            ],
-        ];
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$procs = @{};
+Get-Process | ForEach-Object { $procs[[int]$_.Id] = [string]$_.ProcessName };
+@(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Sort-Object LocalPort | ForEach-Object {
+    $pidVal = [int]$_.OwningProcess;
+    $procName = if ($procs.ContainsKey($pidVal)) { $procs[$pidVal] } else { 'Unknown' };
+    [PSCustomObject]@{
+        Protocol = 'TCP';
+        LocalAddress = [string]$_.LocalAddress;
+        LocalPort = [string]$_.LocalPort;
+        Pid = [string]$pidVal;
+        ProcessName = [string]$procName
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $ports = [];
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $ports[] = [
+                'protocol' => trim((string) ($item['Protocol'] ?? 'TCP')),
+                'local_address' => trim((string) ($item['LocalAddress'] ?? '0.0.0.0')),
+                'port' => trim((string) ($item['LocalPort'] ?? '0')),
+                'pid' => trim((string) ($item['Pid'] ?? '0')),
+                'process' => trim((string) ($item['ProcessName'] ?? 'Unknown')),
+            ];
+        }
+
+        return $ports;
     }
 
     /**
@@ -240,16 +621,184 @@ class WindowsDriver implements SystemDriverInterface
      */
     public function cleanTempFiles(): ActionResult
     {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$targets = @($env:TEMP, 'C:\Windows\Temp') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique;
+$sizeBefore = 0.0;
+$sizeAfter = 0.0;
+$deletedFiles = 0;
+$skippedFiles = 0;
+
+foreach ($dir in $targets) {
+    if (Test-Path -LiteralPath $dir) {
+        $filesBefore = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue);
+        $sizeBefore += [double](($filesBefore | Measure-Object -Property Length -Sum).Sum);
+
+        $items = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue);
+        foreach ($item in $items) {
+            Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction SilentlyContinue;
+            if (Test-Path -LiteralPath $item.FullName) {
+                $skippedFiles++;
+            } else {
+                $deletedFiles++;
+            }
+        }
+
+        $filesAfter = @(Get-ChildItem -LiteralPath $dir -Recurse -File -Force -ErrorAction SilentlyContinue);
+        $sizeAfter += [double](($filesAfter | Measure-Object -Property Length -Sum).Sum);
+    }
+}
+
+$freedBytes = [Math]::Max(0.0, $sizeBefore - $sizeAfter);
+[PSCustomObject]@{
+    FreedBytes = [double]$freedBytes;
+    DeletedFiles = [int]$deletedFiles;
+    SkippedFiles = [int]$skippedFiles;
+    Targets = @($targets)
+} | ConvertTo-Json -Compress
+PS;
+
+        $data = $this->runPowerShellJson($script, 60);
+        $this->processRunner->run(['ipconfig', '/flushdns']);
+
+        if ($data === []) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.maintenance.clean_failed',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $freedBytes = max(0.0, (float) ($data['FreedBytes'] ?? 0.0));
+        $paths = isset($data['Targets']) && is_array($data['Targets'])
+            ? array_map('strval', $data['Targets'])
+            : ['%TEMP%', 'C:\\Windows\\Temp'];
+
         return new ActionResult(
             success: true,
             message: 'messages.maintenance.clean_success',
             details: [
-                'deleted_files' => 142,
-                'skipped_locked_files' => 5,
-                'freed_space' => '248.5 MB',
-                'paths' => ['%TEMP%', 'C:\\Windows\\Temp'],
+                'deleted_files' => (int) ($data['DeletedFiles'] ?? 0),
+                'skipped_locked_files' => (int) ($data['SkippedFiles'] ?? 0),
+                'freed_space' => $this->formatBytes($freedBytes),
+                'paths' => $paths,
+                'commands_executed' => ['Remove-Item Temp', 'ipconfig /flushdns'],
                 'driver' => 'Windows',
             ],
         );
+    }
+
+    /**
+     * Execute a PowerShell script safely with UTF-8 output encoding.
+     */
+    protected function runPowerShell(string $script, int $timeout = 30): ProcessResult
+    {
+        return $this->processRunner->run([
+            'powershell',
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            self::UTF8_PREAMBLE . $script,
+        ], $timeout);
+    }
+
+    /**
+     * Execute a PowerShell script and decode its JSON output into an array.
+     *
+     * @return array<int|string, mixed>
+     */
+    protected function runPowerShellJson(string $script, int $timeout = 30): array
+    {
+        $result = $this->runPowerShell($script, $timeout);
+
+        if ($result->output === '') {
+            return [];
+        }
+
+        $decoded = json_decode($result->output, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Normalize PowerShell JSON decoded payloads into a list of associative arrays.
+     * PowerShell's ConvertTo-Json unwraps single-element arrays into a single JSON object.
+     *
+     * @param  array<int|string, mixed>  $decoded
+     * @return array<int, array<string, mixed>>
+     */
+    protected function normalizeJsonList(array $decoded): array
+    {
+        if ($decoded === []) {
+            return [];
+        }
+
+        if (! array_is_list($decoded)) {
+            return [$decoded];
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Format byte counts into human-readable units (B, KB, MB, GB, TB).
+     */
+    protected function formatBytes(float $bytes): string
+    {
+        if ($bytes <= 0.0) {
+            return '0.00 B';
+        }
+
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $power = min((int) floor(log($bytes, 1024)), count($units) - 1);
+        $value = $bytes / (1024 ** $power);
+
+        return sprintf('%.2f %s', $value, $units[$power]);
+    }
+
+    /**
+     * Map Windows PrinterStatus enum numbers or strings into readable labels.
+     */
+    protected function normalizePrinterStatus(string $status): string
+    {
+        return match ($status) {
+            '0', 'Normal' => 'Normal',
+            '1', 'Paused' => 'Paused',
+            '2', 'Error' => 'Error',
+            '3', 'PendingDeletion' => 'Pending Deletion',
+            '4', 'PaperJam' => 'Paper Jam',
+            '5', 'PaperOut' => 'Paper Out',
+            '6', 'ManualFeed' => 'Manual Feed',
+            '7', 'PaperProblem' => 'Paper Problem',
+            '8', 'Offline' => 'Offline',
+            default => $status !== '' ? $status : 'Normal',
+        };
+    }
+
+    /**
+     * Detect whether a PowerShell/OS error message was caused by insufficient permissions.
+     */
+    protected function isPermissionDeniedError(string $errorText): bool
+    {
+        $lower = strtolower($errorText);
+
+        return str_contains($lower, 'access is denied')
+            || str_contains($lower, 'acesso negado')
+            || str_contains($lower, 'permissiondenied')
+            || str_contains($lower, 'unauthorizedaccessexception')
+            || str_contains($lower, 'requires elevation');
+    }
+
+    /**
+     * Normalize multi-line CLI stdout into a compact single-line summary.
+     */
+    protected function normalizeConsoleOutput(string $output): string
+    {
+        $lines = array_values(array_filter(
+            array_map('trim', preg_split('/\r\n|\r|\n/', $output) ?: []),
+            fn (string $line): bool => $line !== ''
+        ));
+
+        return implode(' | ', $lines);
     }
 }
