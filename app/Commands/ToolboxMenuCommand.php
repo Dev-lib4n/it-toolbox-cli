@@ -47,8 +47,8 @@ class ToolboxMenuCommand extends Command
                 options: [
                     '1' => (string) __('messages.menu.categories.health_check'),
                     '2' => (string) __('messages.menu.categories.system'),
-                    '3' => (string) __('messages.menu.categories.printers'),
-                    '4' => (string) __('messages.menu.categories.network'),
+                    '3' => (string) __('messages.menu.categories.network'),
+                    '4' => (string) __('messages.menu.categories.printers'),
                     '5' => (string) __('messages.menu.categories.maintenance'),
                     '6' => (string) __('messages.menu.categories.security'),
                     '7' => (string) __('messages.menu.categories.reports'),
@@ -75,8 +75,8 @@ class ToolboxMenuCommand extends Command
             } else {
                 $category = match ($choice) {
                     '2' => 'system',
-                    '3' => 'printers',
-                    '4' => 'network',
+                    '3' => 'network',
+                    '4' => 'printers',
                     '5' => 'maintenance',
                     '6' => 'security',
                     '7' => 'reports',
@@ -168,12 +168,6 @@ class ToolboxMenuCommand extends Command
                     '8' => ['label' => (string) __('messages.menu.actions.system_env'), 'command' => 'system:env'],
                     '9' => ['label' => (string) __('messages.menu.actions.system_kill'), 'command' => 'system:kill'],
                 ],
-                'printers' => [
-                    '1' => ['label' => (string) __('messages.menu.actions.printer_list'), 'command' => 'printer:list'],
-                    '2' => ['label' => (string) __('messages.menu.actions.printer_clear'), 'command' => 'printer:clear'],
-                    '3' => ['label' => (string) __('messages.menu.actions.printer_test_page'), 'command' => 'printer:test-page'],
-                    '4' => ['label' => (string) __('messages.menu.actions.printer_default'), 'command' => 'printer:default'],
-                ],
                 'network' => [
                     '1' => ['label' => (string) __('messages.menu.actions.network_check'), 'command' => 'network:check'],
                     '2' => ['label' => (string) __('messages.menu.actions.network_flush'), 'command' => 'network:flush'],
@@ -185,11 +179,17 @@ class ToolboxMenuCommand extends Command
                     '8' => ['label' => (string) __('messages.menu.actions.network_scan'), 'command' => 'network:scan'],
                     '9' => ['label' => (string) __('messages.menu.actions.network_public'), 'command' => 'network:public'],
                 ],
+                'printers' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.printer_list'), 'command' => 'printer:list'],
+                    '2' => ['label' => (string) __('messages.menu.actions.printer_clear'), 'command' => 'printer:clear'],
+                    '3' => ['label' => (string) __('messages.menu.actions.printer_test_page'), 'command' => 'printer:test-page'],
+                    '4' => ['label' => (string) __('messages.menu.actions.printer_default'), 'command' => 'printer:default'],
+                ],
                 'maintenance' => [
                     '1' => ['label' => (string) __('messages.menu.actions.clean_temp'), 'command' => 'clean:temp'],
-                    '2' => ['label' => (string) __('messages.menu.actions.maintenance_browsers'), 'command' => 'maintenance:browsers'],
+                    '2' => ['label' => (string) __('messages.menu.actions.maintenance_repair'), 'command' => 'maintenance:repair'],
                     '3' => ['label' => (string) __('messages.menu.actions.maintenance_large_files'), 'command' => 'maintenance:large-files'],
-                    '4' => ['label' => (string) __('messages.menu.actions.maintenance_repair'), 'command' => 'maintenance:repair'],
+                    '4' => ['label' => (string) __('messages.menu.actions.maintenance_browsers'), 'command' => 'maintenance:browsers'],
                     '5' => ['label' => (string) __('messages.menu.actions.maintenance_updates'), 'command' => 'maintenance:updates'],
                     '6' => ['label' => (string) __('messages.menu.actions.maintenance_scheduler'), 'command' => 'maintenance:scheduler'],
                 ],
@@ -201,8 +201,8 @@ class ToolboxMenuCommand extends Command
                 ],
                 'reports' => [
                     '1' => ['label' => (string) __('messages.menu.actions.report_export'), 'command' => 'report:export'],
-                    '2' => ['label' => (string) __('messages.menu.actions.toolbox_inventory'), 'command' => 'toolbox:inventory'],
-                    '3' => ['label' => (string) __('messages.menu.actions.toolbox_benchmark'), 'command' => 'toolbox:benchmark'],
+                    '2' => ['label' => (string) __('messages.menu.actions.toolbox_benchmark'), 'command' => 'toolbox:benchmark'],
+                    '3' => ['label' => (string) __('messages.menu.actions.toolbox_inventory'), 'command' => 'toolbox:inventory'],
                 ],
                 default => [],
             };
