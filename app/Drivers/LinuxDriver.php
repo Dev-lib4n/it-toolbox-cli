@@ -1233,12 +1233,6 @@ class LinuxDriver implements SystemDriverInterface
                         }
 
                         $pathname = $entry->getPathname();
-                        if (@readlink($pathname) !== false) {
-                            $skippedFiles++;
-
-                            continue;
-                        }
-
                         $filename = $entry->getFilename();
                         if ($this->isProtectedTempEntry($filename)) {
                             $skippedFiles++;

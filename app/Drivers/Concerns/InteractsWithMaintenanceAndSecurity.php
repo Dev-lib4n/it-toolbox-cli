@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Drivers\Concerns;
 
 use App\DTOs\ActionResult;
+use FilesystemIterator;
 use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -136,26 +137,32 @@ trait InteractsWithMaintenanceAndSecurity
             return;
         }
 
+        // Canonicalize the scan root (expanding Windows 8.3 short paths like RUNNER~1 to runneradmin)
+        // so RecursiveDirectoryIterator items always share the exact same prefix as the root.
+        $canonicalRoot = realpath($directory) ?: $directory;
+        $canonicalRoot = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $canonicalRoot);
+        if (preg_match('/^[A-Za-z]:$/', $canonicalRoot) === 1) {
+            $canonicalRoot .= DIRECTORY_SEPARATOR;
+        } elseif ($canonicalRoot !== DIRECTORY_SEPARATOR && preg_match('/^[A-Za-z]:\\\\$/', $canonicalRoot) !== 1) {
+            $canonicalRoot = rtrim($canonicalRoot, '/\\');
+        }
+
         try {
             $dirIterator = new RecursiveDirectoryIterator(
-                $directory,
-                RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::CURRENT_AS_FILEINFO
+                $canonicalRoot,
+                FilesystemIterator::SKIP_DOTS
             );
 
             $filterIterator = new RecursiveCallbackFilterIterator(
                 $dirIterator,
-                function (SplFileInfo $current) use ($directory, $shouldDescendDir, $onUnreadableDir): bool {
+                function (SplFileInfo $current) use ($canonicalRoot, $shouldDescendDir, $onUnreadableDir): bool {
                     try {
                         if ($current->isLink()) {
                             return false;
                         }
 
                         $pathname = $current->getPathname();
-                        if (@readlink($pathname) !== false) {
-                            return false;
-                        }
-
-                        if ($this->isExcludedDirectory($pathname, $directory)) {
+                        if ($this->isExcludedDirectory($pathname, $canonicalRoot)) {
                             return false;
                         }
 
@@ -193,12 +200,7 @@ trait InteractsWithMaintenanceAndSecurity
                         continue;
                     }
 
-                    $pathname = $item->getPathname();
-                    if (@readlink($pathname) !== false) {
-                        continue;
-                    }
-
-                    $onFile($item, $pathname);
+                    $onFile($item, $item->getPathname());
                 } catch (Throwable) {
                     continue;
                 }
@@ -271,27 +273,34 @@ trait InteractsWithMaintenanceAndSecurity
 
     /**
      * Check whether a scanned path matches protected or virtual OS directories relative to the scan root.
-     * Never matches parent segments above $rootPath (e.g. C:\Users\runneradmin\AppData\Local\Temp).
+     * Never rejects entries when parent ancestors above $rootPath contain excluded names or if prefix cannot be aligned.
      */
     protected function isExcludedDirectory(string $currentPath, string $rootPath): bool
     {
-        $normalizedRoot = rtrim(str_replace('\\', '/', $rootPath), '/');
-        $normalizedCurrent = str_replace('\\', '/', $currentPath);
+        $normalizedRoot = rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $rootPath), '/\\');
+        $normalizedItem = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $currentPath);
 
-        if ($normalizedRoot !== '' && str_starts_with(strtolower($normalizedCurrent), strtolower($normalizedRoot) . '/')) {
-            $relative = ltrim(substr($normalizedCurrent, strlen($normalizedRoot)), '/');
-        } elseif ($normalizedRoot === '') {
-            $relative = ltrim($normalizedCurrent, '/');
+        if ($normalizedRoot === '') {
+            $relative = ltrim($normalizedItem, '/\\');
         } else {
-            $relative = basename($normalizedCurrent);
+            $prefix = $normalizedRoot . DIRECTORY_SEPARATOR;
+            $prefixMatches = PHP_OS_FAMILY === 'Windows'
+                ? str_starts_with(strtolower($normalizedItem), strtolower($prefix))
+                : str_starts_with($normalizedItem, $prefix);
+
+            if (! $prefixMatches) {
+                return false;
+            }
+
+            $relative = substr($normalizedItem, strlen($prefix));
         }
 
-        if ($relative === '') {
+        if ($relative === '' || $relative === false) {
             return false;
         }
 
-        $relativeLower = strtolower($relative);
-        $segments = explode('/', $relativeLower);
+        $relativeSlash = strtolower(str_replace('\\', '/', $relative));
+        $segments = explode('/', $relativeSlash);
 
         $excludedSegments = [
             'proc', 'sys', 'dev', 'run', 'snap', 'winsxs', 'system volume information', '$recycle.bin',
@@ -303,9 +312,9 @@ trait InteractsWithMaintenanceAndSecurity
             }
         }
 
-        return str_contains($relativeLower, 'windows/winsxs')
-            || str_contains($relativeLower, '$recycle.bin')
-            || str_contains($relativeLower, 'system volume information');
+        return str_contains($relativeSlash, 'windows/winsxs')
+            || str_contains($relativeSlash, '$recycle.bin')
+            || str_contains($relativeSlash, 'system volume information');
     }
 
     /**
