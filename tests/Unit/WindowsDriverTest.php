@@ -743,9 +743,12 @@ it('hardens cleanTempFiles, cleanBrowserCaches, getHostsEntries, and auditEnviro
     file_put_contents($browserLockedFile, str_repeat('K', 1024));
     file_put_contents($validHostsFile, "127.0.0.1 localhost\n10.0.0.5 intranet.corp\n");
 
-    $tempHandle = @fopen($tempLockedFile, 'r+b');
-    $browserHandle = @fopen($browserLockedFile, 'r+b');
-    if ($isNonRootUnix) {
+    // On Windows, PHP unlink() rejects read-only (0444) files with Permission Denied;
+    // on non-root Unix, removing directory write permission (0555) blocks unlink().
+    if (PHP_OS_FAMILY === 'Windows') {
+        @chmod($tempLockedFile, 0444);
+        @chmod($browserLockedFile, 0444);
+    } elseif ($isNonRootUnix) {
         @chmod($tempLockedSubDir, 0555);
         @chmod($browserLockedSubDir, 0555);
     }
@@ -784,7 +787,9 @@ it('hardens cleanTempFiles, cleanBrowserCaches, getHostsEntries, and auditEnviro
         expect($hostsBlockedDefault->success)->toBeFalse()
             ->and($hostsBlockedDefault->message)->toBe('messages.security.hosts_permission_denied');
 
-        $envAudit = $driver->auditEnvironmentPath(sys_get_temp_dir() . ';\\\\offline-server\\share\\tools;C:\\DoesNotExist_999');
+        $envAudit = $driver->auditEnvironmentPath(
+            sys_get_temp_dir() . ';\\\\offline-server\\share\\tools;' . $baseTemp . DIRECTORY_SEPARATOR . 'DoesNotExist_999'
+        );
         expect($envAudit['summary']['valid'])->toBe(1)
             ->and($envAudit['summary']['broken'])->toBe(1)
             ->and($envAudit['path_entries'][1]['status'])->toBe('NETWORK_UNC');
@@ -804,14 +809,10 @@ it('hardens cleanTempFiles, cleanBrowserCaches, getHostsEntries, and auditEnviro
             ->and($fallbackBench->details['fallback_from'])->toBe($unwritableTarget)
             ->and($fallbackBench->details['target_disk'])->toBe(sys_get_temp_dir());
     } finally {
-        if (is_resource($tempHandle)) {
-            @fclose($tempHandle);
-        }
-        if (is_resource($browserHandle)) {
-            @fclose($browserHandle);
-        }
         @chmod($tempLockedSubDir, 0755);
         @chmod($browserLockedSubDir, 0755);
+        @chmod($tempLockedFile, 0644);
+        @chmod($browserLockedFile, 0644);
         @unlink($tempRemovableFile);
         @unlink($tempLockedFile);
         @unlink($browserRemovableFile);
