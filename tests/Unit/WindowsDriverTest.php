@@ -217,3 +217,81 @@ it('retrieves critical and error Windows Event Logs and handles empty logs grace
         ->and($emptyResult->details['count'])->toBe(0)
         ->and($emptyResult->details['events'])->toBeEmpty();
 });
+
+it('parses Windows Wi-Fi metrics, ARP LAN devices, and executes network stack reset with Admin check', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $callIndex = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->callIndex++;
+
+            return match ($this->callIndex) {
+                1 => new ProcessResult(0, implode("\r\n", [
+                    '    Name                   : Wi-Fi',
+                    '    State                  : connected',
+                    '    SSID                   : CorpNet-5G',
+                    '    BSSID                  : aa:bb:cc:dd:ee:ff',
+                    '    Radio type             : 802.11ax',
+                    '    Channel                : 36',
+                    '    Receive rate (Mbps)    : 866.7',
+                    '    Transmit rate (Mbps)   : 866.7',
+                    '    Signal                 : 92%',
+                ])),
+                2 => new ProcessResult(0, 'There is no wireless interface on the system.'),
+                3 => new ProcessResult(1, '', 'Access is denied.', false), // net session not admin
+                4 => new ProcessResult(0, 'The command completed successfully.'), // net session admin
+                5, 6, 7, 8, 9 => new ProcessResult(0, 'OK'),
+                10 => new ProcessResult(0, implode("\r\n", [
+                    'Interface: 192.168.1.105 --- 0xc',
+                    '  Internet Address      Physical Address      Type',
+                    '  192.168.1.1           00-1a-2b-3c-4d-5e     dynamic',
+                    '  192.168.1.50          11-22-33-44-55-66     dynamic',
+                    '  224.0.0.22            01-00-5e-00-00-16     static',
+                    '  255.255.255.255       ff-ff-ff-ff-ff-ff     static',
+                ])),
+                default => new ProcessResult(0, ''),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $wifi = $driver->getWifiInfo();
+    expect($wifi->success)->toBeTrue()
+        ->and($wifi->details['ssid'])->toBe('CorpNet-5G')
+        ->and($wifi->details['bssid'])->toBe('aa:bb:cc:dd:ee:ff')
+        ->and($wifi->details['signal'])->toBe('92%')
+        ->and($wifi->details['channel'])->toBe('36')
+        ->and($wifi->details['rx_rate'])->toBe('866.7 Mbps');
+
+    $noWifi = $driver->getWifiInfo();
+    expect($noWifi->success)->toBeFalse()
+        ->and($noWifi->message)->toBe('messages.network.no_wifi');
+
+    $deniedReset = $driver->resetNetworkStack();
+    expect($deniedReset->success)->toBeFalse()
+        ->and($deniedReset->message)->toBe('messages.common.permission_denied');
+
+    $adminReset = $driver->resetNetworkStack();
+    expect($adminReset->success)->toBeTrue()
+        ->and($adminReset->message)->toBe('messages.network.reset_success')
+        ->and($adminReset->details['commands_executed'])->toHaveCount(5);
+
+    $lanDevices = $driver->scanLanDevices();
+    expect($lanDevices)->toHaveCount(2)
+        ->and($lanDevices[0]['ip'])->toBe('192.168.1.1')
+        ->and($lanDevices[0]['mac'])->toBe('00:1A:2B:3C:4D:5E')
+        ->and($lanDevices[1]['ip'])->toBe('192.168.1.50');
+});

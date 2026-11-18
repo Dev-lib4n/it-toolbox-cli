@@ -169,6 +169,12 @@ class ToolboxMenuCommand extends Command
                     '1' => ['label' => (string) __('messages.menu.actions.network_check'), 'command' => 'network:check'],
                     '2' => ['label' => (string) __('messages.menu.actions.network_flush'), 'command' => 'network:flush'],
                     '3' => ['label' => (string) __('messages.menu.actions.network_ports'), 'command' => 'network:ports'],
+                    '4' => ['label' => (string) __('messages.menu.actions.network_probe'), 'command' => 'network:probe'],
+                    '5' => ['label' => (string) __('messages.menu.actions.network_wifi'), 'command' => 'network:wifi'],
+                    '6' => ['label' => (string) __('messages.menu.actions.network_reset'), 'command' => 'network:reset'],
+                    '7' => ['label' => (string) __('messages.menu.actions.network_ssl'), 'command' => 'network:ssl'],
+                    '8' => ['label' => (string) __('messages.menu.actions.network_scan'), 'command' => 'network:scan'],
+                    '9' => ['label' => (string) __('messages.menu.actions.network_public'), 'command' => 'network:public'],
                 ],
                 'maintenance' => [
                     '1' => ['label' => (string) __('messages.menu.actions.clean_temp'), 'command' => 'clean:temp'],

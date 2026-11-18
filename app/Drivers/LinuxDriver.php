@@ -6,6 +6,7 @@ namespace App\Drivers;
 
 use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\SystemDriverInterface;
+use App\Drivers\Concerns\InteractsWithNetworkSockets;
 use App\DTOs\ActionResult;
 use App\Services\SymfonyProcessExecutor;
 use Closure;
@@ -15,6 +16,7 @@ use Throwable;
 
 class LinuxDriver implements SystemDriverInterface
 {
+    use InteractsWithNetworkSockets;
     /**
      * Real block/disk filesystem types to include in storage health checks.
      *
@@ -672,6 +674,213 @@ class LinuxDriver implements SystemDriverInterface
             if ($result->successful && $result->output !== '') {
                 return $this->parseNetstatPorts($result->output);
             }
+        }
+
+        return [];
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getWifiInfo(): ActionResult
+    {
+        $nmcliResult = $this->processRunner->run([
+            'nmcli',
+            '-t',
+            '-f',
+            'ACTIVE,SSID,BSSID,CHAN,FREQ,RATE,SIGNAL',
+            'dev',
+            'wifi',
+        ]);
+
+        if ($nmcliResult->successful && $nmcliResult->output !== '') {
+            $lines = preg_split('/\r\n|\r|\n/', trim($nmcliResult->output)) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '') {
+                    continue;
+                }
+
+                // Split on unescaped colons (nmcli escapes colons inside BSSID as \:)
+                $parts = preg_split('/(?<!\\\\):/', $line);
+                if (! is_array($parts) || count($parts) < 7) {
+                    continue;
+                }
+
+                $active = strtolower(trim($parts[0]));
+                if ($active !== 'yes' && $active !== 'sim') {
+                    continue;
+                }
+
+                $ssid = str_replace('\\:', ':', trim($parts[1]));
+                $bssid = str_replace('\\:', ':', trim($parts[2]));
+                $chan = trim($parts[3]);
+                $freq = trim($parts[4]);
+                $rate = trim($parts[5]);
+                $signal = trim($parts[6]);
+
+                return new ActionResult(
+                    success: true,
+                    message: 'messages.network.wifi_fetched_success',
+                    details: [
+                        'interface' => 'wlan0 (nmcli)',
+                        'state' => 'Connected',
+                        'ssid' => $ssid !== '' ? $ssid : '-',
+                        'bssid' => $bssid !== '' ? $bssid : '-',
+                        'signal' => $signal !== '' && ! str_ends_with($signal, '%') ? $signal . '%' : ($signal ?: '-'),
+                        'channel' => $chan !== '' ? $chan : '-',
+                        'band' => $freq !== '' ? $freq : '-',
+                        'rx_rate' => $rate !== '' ? $rate : '-',
+                        'tx_rate' => $rate !== '' ? $rate : '-',
+                        'driver' => 'Linux',
+                    ],
+                );
+            }
+        }
+
+        // Fallback to `iw dev`
+        $iwResult = $this->processRunner->run(['iw', 'dev']);
+        if ($iwResult->successful && $iwResult->output !== '') {
+            if (preg_match('/Interface\s+(\S+)/', $iwResult->output, $ifaceMatch) === 1) {
+                $iface = $ifaceMatch[1];
+                $ssid = preg_match('/ssid\s+(.+)$/m', $iwResult->output, $ssidMatch) === 1 ? trim($ssidMatch[1]) : '-';
+                $chan = preg_match('/channel\s+(\d+)\s+\(([^)]+)\)/', $iwResult->output, $chanMatch) === 1
+                    ? $chanMatch[1]
+                    : '-';
+                $freq = isset($chanMatch[2]) ? trim($chanMatch[2]) : '-';
+
+                return new ActionResult(
+                    success: true,
+                    message: 'messages.network.wifi_fetched_success',
+                    details: [
+                        'interface' => $iface,
+                        'state' => $ssid !== '-' ? 'Connected' : 'Disconnected',
+                        'ssid' => $ssid,
+                        'bssid' => '-',
+                        'signal' => '-',
+                        'channel' => $chan,
+                        'band' => $freq,
+                        'rx_rate' => '-',
+                        'tx_rate' => '-',
+                        'driver' => 'Linux',
+                    ],
+                );
+            }
+        }
+
+        return new ActionResult(
+            success: false,
+            message: 'messages.network.no_wifi',
+            details: ['driver' => 'Linux'],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function resetNetworkStack(): ActionResult
+    {
+        if (! $this->isRoot()) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.common.permission_denied',
+                details: ['driver' => 'Linux'],
+            );
+        }
+
+        $executed = [];
+
+        $nmRestart = $this->processRunner->run(['systemctl', 'restart', 'NetworkManager']);
+        if ($nmRestart->successful) {
+            $executed[] = 'systemctl restart NetworkManager';
+        } else {
+            $networkdRestart = $this->processRunner->run(['systemctl', 'restart', 'systemd-networkd']);
+            if ($networkdRestart->successful) {
+                $executed[] = 'systemctl restart systemd-networkd';
+            }
+        }
+
+        if ($this->commandExists('dhclient')) {
+            $this->processRunner->run(['dhclient', '-r']);
+            $this->processRunner->run(['dhclient']);
+            $executed[] = 'dhclient -r && dhclient';
+        }
+
+        if ($executed === []) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.network.reset_failed',
+                details: ['driver' => 'Linux'],
+            );
+        }
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.network.reset_success',
+            details: [
+                'commands_executed' => $executed,
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function scanLanDevices(): array
+    {
+        $neighResult = $this->processRunner->run(['ip', 'neigh', 'show']);
+        if ($neighResult->successful && $neighResult->output !== '') {
+            $devices = [];
+            $lines = preg_split('/\r\n|\r|\n/', trim($neighResult->output)) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if (preg_match('/^([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s+dev\s+(\S+)\s+lladdr\s+([0-9a-fA-F:]{17})\s+(\S+)/', $line, $m) === 1) {
+                    $ip = $m[1];
+                    $iface = $m[2];
+                    $mac = strtoupper($m[3]);
+                    $state = strtoupper($m[4]);
+
+                    if (! $this->isUnicastLanNeighbor($ip, $mac)) {
+                        continue;
+                    }
+
+                    $devices[] = [
+                        'ip' => $ip,
+                        'mac' => $mac,
+                        'status' => $state,
+                        'interface' => $iface,
+                    ];
+                }
+            }
+
+            return $devices;
+        }
+
+        $arpResult = $this->processRunner->run(['arp', '-n']);
+        if ($arpResult->successful && $arpResult->output !== '') {
+            $devices = [];
+            $lines = preg_split('/\r\n|\r|\n/', trim($arpResult->output)) ?: [];
+            foreach ($lines as $line) {
+                if (preg_match('/^([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s+\S+\s+([0-9a-fA-F:]{17})\s+\S+\s+(\S+)/', trim($line), $m) === 1) {
+                    $ip = $m[1];
+                    $mac = strtoupper($m[2]);
+                    $iface = $m[3];
+
+                    if (! $this->isUnicastLanNeighbor($ip, $mac)) {
+                        continue;
+                    }
+
+                    $devices[] = [
+                        'ip' => $ip,
+                        'mac' => $mac,
+                        'status' => 'REACHABLE',
+                        'interface' => $iface,
+                    ];
+                }
+            }
+
+            return $devices;
         }
 
         return [];
