@@ -267,6 +267,73 @@ PS,
     /**
      * {@inheritDoc}
      */
+    public function getCriticalLogs(int $limit = 15): ActionResult
+    {
+        $safeLimit = max(1, $limit);
+
+        $script = sprintf(
+            <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$events = @(Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=1,2; StartTime=(Get-Date).AddHours(-24)} -MaxEvents %d -ErrorAction SilentlyContinue | Select-Object TimeCreated, Id, ProviderName, Level, LevelDisplayName, Message | ForEach-Object {
+    $timeStr = if ($_.TimeCreated -is [DateTime]) { $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss') } else { [string]$_.TimeCreated };
+    [PSCustomObject]@{
+        TimeCreated = [string]$timeStr;
+        Id = [string]$_.Id;
+        ProviderName = [string]$_.ProviderName;
+        Level = [int]($_.Level -as [int]);
+        LevelDisplayName = [string]$_.LevelDisplayName;
+        Message = [string](($_.Message -replace '[\r\n\t]+', ' ').Trim())
+    }
+});
+if ($events.Count -eq 0) {
+    Write-Output '[]';
+} else {
+    $events | ConvertTo-Json -Compress
+}
+PS,
+            $safeLimit
+        );
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $events = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || $item === []) {
+                continue;
+            }
+
+            $levelInt = (int) ($item['Level'] ?? 2);
+            $levelDisplay = strtolower(trim((string) ($item['LevelDisplayName'] ?? '')));
+            $levelLabel = ($levelInt === 1 || str_contains($levelDisplay, 'crit')) ? 'CRITICAL' : 'ERROR';
+
+            $provider = trim((string) ($item['ProviderName'] ?? 'System'));
+            $eventId = trim((string) ($item['Id'] ?? ''));
+            $source = $eventId !== '' ? sprintf('%s (ID %s)', $provider, $eventId) : $provider;
+
+            $events[] = [
+                'timestamp' => trim((string) ($item['TimeCreated'] ?? '-')) ?: '-',
+                'level' => $levelLabel,
+                'source' => $source !== '' ? $source : 'System',
+                'message' => $this->truncateLogMessage((string) ($item['Message'] ?? '-')),
+            ];
+        }
+
+        $events = array_slice($events, 0, $safeLimit);
+
+        return new ActionResult(
+            success: true,
+            message: $events !== [] ? 'messages.logs.fetched_success' : 'messages.logs.no_logs',
+            details: [
+                'events' => $events,
+                'count' => count($events),
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function listPrinters(): array
     {
         $script = <<<'PS'
@@ -800,5 +867,22 @@ PS;
         ));
 
         return implode(' | ', $lines);
+    }
+
+    /**
+     * Normalize whitespace and truncate long event log messages cleanly for terminal tables.
+     */
+    protected function truncateLogMessage(string $message, int $maxLength = 90): string
+    {
+        $clean = trim((string) preg_replace('/\s+/', ' ', $message));
+        if ($clean === '') {
+            return '-';
+        }
+
+        if (mb_strlen($clean) <= $maxLength) {
+            return $clean;
+        }
+
+        return rtrim(mb_substr($clean, 0, $maxLength - 3)) . '...';
     }
 }

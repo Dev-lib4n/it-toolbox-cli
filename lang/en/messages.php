@@ -30,16 +30,19 @@ return [
         'back' => '← Back to Main Menu',
         'exit' => '✖ Exit IT Toolbox',
         'categories' => [
+            'health_check' => '🩺 Full Health Check & Machine Score (health:check)',
             'system' => '🖥  System & Hardware Diagnostics',
             'printers' => '🖨  Printers & Spooler Management',
             'network' => '🌐 Network & Connectivity Diagnostics',
             'maintenance' => '🧹 System Maintenance & Cleanup',
             'reports' => '📄 Export Diagnostic Report',
+            'self_update' => '⬆️  Check for Updates (self:update)',
             'language' => '🌍 Switch Language (EN / PT-BR)',
         ],
         'actions' => [
             'system_info' => 'View OS, CPU, RAM & Storage Health (system:info)',
             'system_top' => 'Inspect Top Processes & Kill Frozen Tasks (system:top)',
+            'system_logs' => 'Inspect Critical OS Logs & Recent Errors (system:logs)',
             'printer_list' => 'List Installed Printers & Status (printer:list)',
             'printer_clear' => 'Restart Spooler & Clear Print Queue (printer:clear)',
             'network_check' => 'Interfaces & Connectivity Health Check (network:check)',
@@ -63,8 +66,10 @@ return [
     ],
 
     'spinners' => [
+        'health_check' => 'Running full system health audit and calculating score...',
         'system_info' => 'Collecting OS, hardware, and storage metrics...',
         'system_top' => 'Querying top resource-consuming processes...',
+        'system_logs' => 'Scanning OS event logs for critical errors in the last 24 hours...',
         'killing_process' => 'Terminating process PID :pid...',
         'printer_list' => 'Querying installed printers and spooler status...',
         'printer_clear' => 'Stopping spooler, purging queue, and restarting service...',
@@ -73,6 +78,8 @@ return [
         'network_ports' => 'Scanning active listening TCP/UDP ports...',
         'clean_temp' => 'Scanning and removing temporary files safely...',
         'report_export' => 'Generating full diagnostic report...',
+        'self_update_check' => 'Checking GitHub Releases for newer versions...',
+        'self_update_download' => 'Downloading and installing update v:version...',
     ],
 
     'system' => [
@@ -114,6 +121,66 @@ return [
         'confirm_kill' => 'Are you sure you want to force-terminate PID :pid (:name)?',
         'process_killed_success' => 'Process terminated successfully.',
         'process_killed_failed' => 'Failed to terminate the selected process.',
+    ],
+
+    'logs' => [
+        'section' => 'Critical OS Logs & Recent Errors (Last 24 Hours)',
+        'fetched_success' => 'Critical OS log events retrieved successfully.',
+        'no_logs' => 'No critical or error events recorded in the last 24 hours.',
+        'headers' => [
+            'timestamp' => 'Timestamp',
+            'level' => 'Level',
+            'source' => 'Source / Service',
+            'message' => 'Message Summary',
+        ],
+    ],
+
+    'health' => [
+        'section' => 'Machine Health Check & Diagnostic Score',
+        'score_label' => 'Health Score',
+        'states' => [
+            'healthy' => 'Healthy',
+            'warning' => 'Warning',
+            'critical' => 'Critical',
+        ],
+        'categories' => [
+            'ram' => 'Memory (RAM)',
+            'storage' => 'Disk Storage',
+            'network' => 'Connectivity & DNS',
+            'printers' => 'Print Spooler & Queue',
+            'logs' => 'Critical OS Logs (24h)',
+        ],
+        'headers' => [
+            'category' => 'Audit Category',
+            'status' => 'State',
+            'summary' => 'Observed Metrics',
+            'impact' => 'Score Impact',
+        ],
+        'logs_count_summary' => ':count critical/error events in the last 24h',
+        'recommendations_title' => 'Recommended Corrective Actions:',
+        'no_recommendations' => 'All health checks passed with zero issues detected.',
+        'ask_export' => 'Would you like to export this health check and full diagnostic snapshot (MD + JSON)?',
+        'recommendations' => [
+            'high_ram' => 'High memory usage detected. Run "system:top" to inspect and terminate memory-heavy processes.',
+            'high_disk' => 'Disk usage exceeds 85%. Run "clean:temp" to free up temporary disk space.',
+            'no_internet' => 'External internet connectivity failed. Run "network:check" to verify physical adapter and gateway.',
+            'dns_failed' => 'DNS resolution failed. Run "network:flush" to flush DNS cache and renew network configuration.',
+            'printer_issue' => 'Pending or stalled print jobs detected. Run "printer:clear" to restart the Print Spooler / CUPS queue.',
+            'critical_logs' => 'Recent critical OS errors found. Run "system:logs" to inspect event details and failing services.',
+        ],
+    ],
+
+    'update' => [
+        'section' => 'IT Toolbox CLI Self-Update',
+        'up_to_date' => 'You are already running the latest version (v:version).',
+        'available' => 'A newer version is available! Current: v:current -> Latest: v:latest',
+        'confirm_download' => 'Download and install v:version (:asset) now?',
+        'updated_success' => 'IT Toolbox CLI has been updated successfully!',
+        'check_failed' => 'Unable to check for updates from GitHub Releases. Verify your internet connection.',
+        'asset_not_found' => 'Release artifact could not be found in the latest GitHub Release.',
+        'download_failed' => 'Failed to download the release binary from GitHub.',
+        'replace_failed' => 'Failed to replace the current executable. Check file write permissions.',
+        'source_mode_warning' => 'Running from unpacked source code in development mode. Please use "git pull && composer install" to update.',
     ],
 
     'printer' => [
@@ -181,6 +248,13 @@ return [
             'commands_executed' => 'Commands Executed',
             'output' => 'Command Output',
             'error' => 'Error Details',
+            'current_version' => 'Current Version',
+            'latest_version' => 'Latest Version',
+            'previous_version' => 'Previous Version',
+            'new_version' => 'Updated Version',
+            'asset_name' => 'Release Artifact',
+            'download_url' => 'Download URL',
+            'count' => 'Event Count',
         ],
     ],
 

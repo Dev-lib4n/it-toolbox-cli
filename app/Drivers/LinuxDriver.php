@@ -332,6 +332,49 @@ class LinuxDriver implements SystemDriverInterface
     /**
      * {@inheritDoc}
      */
+    public function getCriticalLogs(int $limit = 15): ActionResult
+    {
+        $safeLimit = max(1, $limit);
+        $events = [];
+
+        $journalResult = $this->processRunner->run([
+            'journalctl',
+            '-p',
+            'err',
+            '-n',
+            (string) $safeLimit,
+            '--since',
+            '24 hours ago',
+            '--no-pager',
+            '-o',
+            'json',
+        ]);
+
+        if ($journalResult->successful && $journalResult->output !== '') {
+            $events = $this->parseJournalctlJsonLogs($journalResult->output, $safeLimit);
+        }
+
+        if ($events === []) {
+            $syslogRaw = $this->readFile('/var/log/syslog') ?? $this->readFile('/var/log/messages') ?? '';
+            if ($syslogRaw !== '') {
+                $events = $this->parseSyslogErrors($syslogRaw, $safeLimit);
+            }
+        }
+
+        return new ActionResult(
+            success: true,
+            message: $events !== [] ? 'messages.logs.fetched_success' : 'messages.logs.no_logs',
+            details: [
+                'events' => $events,
+                'count' => count($events),
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function listPrinters(): array
     {
         if (! $this->commandExists('lpstat')) {
@@ -1402,5 +1445,128 @@ class LinuxDriver implements SystemDriverInterface
         $value = $bytes / (1024 ** $power);
 
         return sprintf('%.2f %s', $value, $units[$power]);
+    }
+
+    /**
+     * Parse journalctl JSON or JSON-Lines output into structured critical log entries.
+     *
+     * @return array<int, array{timestamp: string, level: string, source: string, message: string}>
+     */
+    protected function parseJournalctlJsonLogs(string $output, int $limit): array
+    {
+        $trimmed = trim($output);
+        if ($trimmed === '' || str_starts_with(strtolower($trimmed), '-- no entries --')) {
+            return [];
+        }
+
+        $entries = [];
+        $decodedWhole = json_decode($trimmed, true);
+        if (is_array($decodedWhole)) {
+            $entries = array_is_list($decodedWhole) ? $decodedWhole : [$decodedWhole];
+        } else {
+            $lines = preg_split('/\r\n|\r|\n/', $trimmed) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || ! str_starts_with($line, '{')) {
+                    continue;
+                }
+                $item = json_decode($line, true);
+                if (is_array($item)) {
+                    $entries[] = $item;
+                }
+            }
+        }
+
+        $events = [];
+        foreach ($entries as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $timestamp = '-';
+            if (isset($entry['__REALTIME_TIMESTAMP']) && is_numeric($entry['__REALTIME_TIMESTAMP'])) {
+                $seconds = (int) floor(((float) $entry['__REALTIME_TIMESTAMP']) / 1_000_000);
+                $timestamp = gmdate('Y-m-d H:i:s', $seconds);
+            } elseif (isset($entry['SYSLOG_TIMESTAMP'])) {
+                $timestamp = trim((string) $entry['SYSLOG_TIMESTAMP']);
+            } elseif (isset($entry['timestamp'])) {
+                $timestamp = trim((string) $entry['timestamp']);
+            }
+
+            $priority = isset($entry['PRIORITY']) ? (int) $entry['PRIORITY'] : 3;
+            $level = $priority <= 2 ? 'CRITICAL' : 'ERROR';
+
+            $source = trim((string) ($entry['SYSLOG_IDENTIFIER'] ?? $entry['_COMM'] ?? $entry['_SYSTEMD_UNIT'] ?? 'kernel'));
+            $rawMsg = is_array($entry['MESSAGE'] ?? null)
+                ? implode(' ', array_map('strval', $entry['MESSAGE']))
+                : (string) ($entry['MESSAGE'] ?? '-');
+
+            $events[] = [
+                'timestamp' => $timestamp !== '' ? $timestamp : '-',
+                'level' => $level,
+                'source' => $source !== '' ? $source : 'system',
+                'message' => $this->truncateLogMessage($rawMsg),
+            ];
+        }
+
+        return array_slice($events, 0, $limit);
+    }
+
+    /**
+     * Fallback parser for /var/log/syslog or /var/log/messages error lines.
+     *
+     * @return array<int, array{timestamp: string, level: string, source: string, message: string}>
+     */
+    protected function parseSyslogErrors(string $raw, int $limit): array
+    {
+        $lines = preg_split('/\r\n|\r|\n/', trim($raw)) ?: [];
+        $matched = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || preg_match('/\b(crit|critical|emerg|alert|fatal|panic|err|error|failed)\b/i', $line) !== 1) {
+                continue;
+            }
+
+            $level = preg_match('/\b(crit|critical|emerg|alert|fatal|panic)\b/i', $line) === 1
+                ? 'CRITICAL'
+                : 'ERROR';
+
+            // Match standard syslog: "Nov 18 10:15:02 host service[123]: message" or ISO timestamp
+            if (preg_match('/^([A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}\S*)\s+\S+\s+([^:]+):\s*(.+)$/', $line, $m) === 1) {
+                $matched[] = [
+                    'timestamp' => trim($m[1]),
+                    'level' => $level,
+                    'source' => trim($m[2]),
+                    'message' => $this->truncateLogMessage($m[3]),
+                ];
+            } else {
+                $matched[] = [
+                    'timestamp' => '-',
+                    'level' => $level,
+                    'source' => 'syslog',
+                    'message' => $this->truncateLogMessage($line),
+                ];
+            }
+        }
+
+        return array_slice(array_reverse($matched), 0, $limit);
+    }
+
+    /**
+     * Normalize whitespace and truncate long log messages cleanly for terminal tables.
+     */
+    protected function truncateLogMessage(string $message, int $maxLength = 90): string
+    {
+        $clean = trim((string) preg_replace('/\s+/', ' ', $message));
+        if ($clean === '') {
+            return '-';
+        }
+
+        if (mb_strlen($clean) <= $maxLength) {
+            return $clean;
+        }
+
+        return rtrim(mb_substr($clean, 0, $maxLength - 3)) . '...';
     }
 }

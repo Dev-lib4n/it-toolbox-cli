@@ -157,3 +157,63 @@ it('validates Administrator privilege when clearing print spooler queue on Windo
         ->and($adminResult->message)->toBe('messages.printer.queue_cleared_success')
         ->and($adminResult->details['deleted_files'])->toBe(4);
 });
+
+it('retrieves critical and error Windows Event Logs and handles empty logs gracefully', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $callIndex = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->callIndex++;
+
+            return match ($this->callIndex) {
+                1 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'TimeCreated' => '2026-11-18 09:15:00',
+                        'Id' => '41',
+                        'ProviderName' => 'Microsoft-Windows-Kernel-Power',
+                        'Level' => 1,
+                        'LevelDisplayName' => 'Critical',
+                        'Message' => 'The system has rebooted without cleanly shutting down first.',
+                    ],
+                    [
+                        'TimeCreated' => '2026-11-18 10:30:00',
+                        'Id' => '1000',
+                        'ProviderName' => 'Application Error',
+                        'Level' => 2,
+                        'LevelDisplayName' => 'Error',
+                        'Message' => 'Faulting application name: spoolsv.exe',
+                    ],
+                ])),
+                default => new ProcessResult(0, '[]'),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $logsResult = $driver->getCriticalLogs(15);
+    expect($logsResult->success)->toBeTrue()
+        ->and($logsResult->message)->toBe('messages.logs.fetched_success')
+        ->and($logsResult->details['count'])->toBe(2)
+        ->and($logsResult->details['events'][0]['level'])->toBe('CRITICAL')
+        ->and($logsResult->details['events'][0]['source'])->toBe('Microsoft-Windows-Kernel-Power (ID 41)')
+        ->and($logsResult->details['events'][1]['level'])->toBe('ERROR');
+
+    $emptyResult = $driver->getCriticalLogs(15);
+    expect($emptyResult->success)->toBeTrue()
+        ->and($emptyResult->message)->toBe('messages.logs.no_logs')
+        ->and($emptyResult->details['count'])->toBe(0)
+        ->and($emptyResult->details['events'])->toBeEmpty();
+});
