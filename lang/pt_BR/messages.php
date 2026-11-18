@@ -79,6 +79,15 @@ return [
         ],
     ],
 
+    'disk_selector' => [
+        'prompt' => 'Selecione o disco/partição ou diretório alvo:',
+        'volume_option' => ':mount (Livre: :available / Total: :total)',
+        'home_option' => 'Diretório do Usuário (Home) — :path',
+        'system_default_option' => 'Volume Temporário Padrão do Sistema (:path)',
+        'custom_path_option' => 'Caminho customizado...',
+        'custom_path_prompt' => 'Informe a letra da unidade ou caminho do diretório',
+    ],
+
     'common' => [
         'metric' => 'Métrica',
         'value' => 'Valor',
@@ -387,6 +396,7 @@ return [
         'repair_success' => 'Verificação de integridade do SO e auditoria de pacotes concluídas com sucesso.',
         'repair_failed' => 'O reparo de integridade encontrou erros ou requer privilégios elevados.',
         'large_files_section' => 'Analisador de Espaço dos Maiores Arquivos em Disco',
+        'large_files_target' => 'Unidade / caminho analisado: :path',
         'invalid_scan_path' => 'O diretório alvo não existe ou não pode ser lido: :path',
         'no_large_files' => 'Nenhum arquivo legível encontrado no diretório informado.',
         'large_files_headers' => [
@@ -462,6 +472,8 @@ return [
             'cycle_count' => 'Contagem de Ciclos',
             'browsers_cleaned' => 'Navegadores Processados',
             'printer' => 'Impressora Alvo',
+            'target_disk' => 'Unidade / Montagem Medida',
+            'fallback_from' => 'Fallback (Alvo Somente Leitura)',
             'cpu_score' => 'Score CPU Single-Core',
             'disk_write_speed' => 'Escrita Sequencial em Disco',
             'disk_read_speed' => 'Leitura Sequencial em Disco',
@@ -471,6 +483,8 @@ return [
 
     'toolbox' => [
         'benchmark_section' => 'Micro-Benchmark de CPU Single-Core & I/O Sequencial de Disco',
+        'benchmark_target' => 'Unidade / montagem alvo para o teste de I/O: :disk',
+        'benchmark_readonly_fallback' => 'O alvo ":requested" é somente leitura ou sem permissão de escrita; usando fallback seguro em ":fallback".',
         'benchmark_success' => 'Micro-benchmark de CPU e I/O de disco concluído com sucesso.',
         'inventory_section' => 'Ficha Técnica de Inventário Patrimonial & Hardware (GLPI / CMDB)',
         'identity_subsection' => 'Identidade do Equipamento, Serial BIOS & Sistema Operacional',

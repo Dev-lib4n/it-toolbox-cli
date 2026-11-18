@@ -788,6 +788,21 @@ it('hardens cleanTempFiles, cleanBrowserCaches, getHostsEntries, and auditEnviro
         expect($envAudit['summary']['valid'])->toBe(1)
             ->and($envAudit['summary']['broken'])->toBe(1)
             ->and($envAudit['path_entries'][1]['status'])->toBe('NETWORK_UNC');
+
+        // Benchmark target directory & fallback verification
+        $customBenchDir = $baseTemp . DIRECTORY_SEPARATOR . 'bench_target';
+        mkdir($customBenchDir, 0755, true);
+        $directBench = $driver->runSystemBenchmark(1, 0.02, $customBenchDir);
+        expect($directBench->success)->toBeTrue()
+            ->and($directBench->details['target_disk'])->toBe($customBenchDir)
+            ->and(array_key_exists('fallback_from', $directBench->details))->toBeFalse();
+        @rmdir($customBenchDir);
+
+        $unwritableTarget = $baseTemp . DIRECTORY_SEPARATOR . 'missing_readonly_drive';
+        $fallbackBench = $driver->runSystemBenchmark(1, 0.02, $unwritableTarget);
+        expect($fallbackBench->success)->toBeTrue()
+            ->and($fallbackBench->details['fallback_from'])->toBe($unwritableTarget)
+            ->and($fallbackBench->details['target_disk'])->toBe(sys_get_temp_dir());
     } finally {
         if (is_resource($tempHandle)) {
             @fclose($tempHandle);

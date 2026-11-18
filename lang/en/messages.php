@@ -79,6 +79,15 @@ return [
         ],
     ],
 
+    'disk_selector' => [
+        'prompt' => 'Select the target disk/partition or directory:',
+        'volume_option' => ':mount (Free: :available / Total: :total)',
+        'home_option' => 'User Home Directory (:path)',
+        'system_default_option' => 'System Default Temporary Volume (:path)',
+        'custom_path_option' => 'Custom path...',
+        'custom_path_prompt' => 'Enter target drive letter or directory path',
+    ],
+
     'common' => [
         'metric' => 'Metric',
         'value' => 'Value',
@@ -387,6 +396,7 @@ return [
         'repair_success' => 'OS integrity verification and package audit completed successfully.',
         'repair_failed' => 'OS integrity repair encountered errors or requires elevated privileges.',
         'large_files_section' => 'Top Largest Files Disk Space Analyzer',
+        'large_files_target' => 'Analyzed volume / path: :path',
         'invalid_scan_path' => 'Target directory does not exist or cannot be read: :path',
         'no_large_files' => 'No readable files found in the target directory.',
         'large_files_headers' => [
@@ -462,6 +472,8 @@ return [
             'cycle_count' => 'Charge Cycle Count',
             'browsers_cleaned' => 'Browsers Processed',
             'printer' => 'Target Printer',
+            'target_disk' => 'Measured Drive / Mount',
+            'fallback_from' => 'Fallback Notice (Read-Only Target)',
             'cpu_score' => 'CPU Single-Core Score',
             'disk_write_speed' => 'Disk Sequential Write',
             'disk_read_speed' => 'Disk Sequential Read',
@@ -471,6 +483,8 @@ return [
 
     'toolbox' => [
         'benchmark_section' => 'CPU Single-Core & Disk Sequential I/O Micro-Benchmark',
+        'benchmark_target' => 'Target drive / mount for disk I/O test: :disk',
+        'benchmark_readonly_fallback' => 'Target ":requested" is read-only or not writable; safely fell back to ":fallback".',
         'benchmark_success' => 'System CPU and Disk I/O micro-benchmark completed successfully.',
         'inventory_section' => 'Hardware & IT Asset Technical Inventory Sheet (GLPI / CMDB)',
         'identity_subsection' => 'System Identity, BIOS Serial & Operating System',

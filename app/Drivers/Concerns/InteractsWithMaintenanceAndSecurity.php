@@ -478,9 +478,13 @@ trait InteractsWithMaintenanceAndSecurity
 
     /**
      * Run a fast, zero-dependency CPU single-core and Disk sequential I/O micro-benchmark.
+     * Supports targeting a specific volume/directory with automatic safe fallback when read-only.
      */
-    public function runSystemBenchmark(int $diskSizeMb = 64, float $cpuDurationSeconds = 1.0): ActionResult
-    {
+    public function runSystemBenchmark(
+        int $diskSizeMb = 64,
+        float $cpuDurationSeconds = 1.0,
+        ?string $targetDirectory = null,
+    ): ActionResult {
         $safeSizeMb = max(1, min(256, $diskSizeMb));
         $safeCpuSeconds = max(0.02, min(5.0, $cpuDurationSeconds));
 
@@ -500,10 +504,34 @@ trait InteractsWithMaintenanceAndSecurity
         $cpuElapsedSec = max(0.001, (hrtime(true) - $cpuStartNs) / 1_000_000_000);
         $opsPerSec = (int) round($iterations / $cpuElapsedSec);
 
-        // 2. Disk Sequential Write & Read I/O Benchmark
-        $tempFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_bench_' . uniqid('', true) . '.tmp';
+        // 2. Resolve & verify writable directory for Disk Sequential Write & Read I/O Benchmark
+        $fallbackTempDir = sys_get_temp_dir();
+        $requestedDir = ($targetDirectory !== null && trim($targetDirectory) !== '')
+            ? trim($targetDirectory)
+            : $fallbackTempDir;
+
+        if (preg_match('/^[A-Za-z]:$/', $requestedDir) === 1) {
+            $requestedDir .= '\\';
+        }
+
+        $benchmarkDir = $requestedDir;
+        $fallbackFrom = null;
+
+        $probeFile = $this->buildBenchmarkTempFilePath($benchmarkDir, 'it_toolbox_probe_');
+        $canWriteTarget = @is_dir($benchmarkDir) && is_resource($probeHandle = @fopen($probeFile, 'wb'));
+        if ($canWriteTarget) {
+            @fclose($probeHandle);
+            @unlink($probeFile);
+        } else {
+            if ($requestedDir !== $fallbackTempDir) {
+                $fallbackFrom = $requestedDir;
+            }
+            $benchmarkDir = $fallbackTempDir;
+        }
+
+        $tempFile = $this->buildBenchmarkTempFilePath($benchmarkDir, 'it_toolbox_bench_');
         $chunkSize = 1048576; // 1 MB
-        $chunkBuffer = str_repeat( hash('sha512', $seed, true), 16384 ); // 64 bytes * 16384 = 1 MB
+        $chunkBuffer = str_repeat(hash('sha512', $seed, true), 16384); // 64 bytes * 16384 = 1 MB
 
         $writeSpeedMb = 0.0;
         $readSpeedMb = 0.0;
@@ -521,7 +549,7 @@ trait InteractsWithMaintenanceAndSecurity
                 $writeSpeedMb = round($safeSizeMb / $writeElapsedSec, 1);
             }
 
-            if (is_file($tempFile)) {
+            if (@is_file($tempFile)) {
                 $fpRead = @fopen($tempFile, 'rb');
                 if (is_resource($fpRead)) {
                     $readStartNs = hrtime(true);
@@ -534,7 +562,7 @@ trait InteractsWithMaintenanceAndSecurity
                 }
             }
         } finally {
-            if (is_file($tempFile)) {
+            if (@is_file($tempFile)) {
                 @unlink($tempFile);
             }
         }
@@ -545,17 +573,37 @@ trait InteractsWithMaintenanceAndSecurity
             default => '🐢 HDD / Standard Storage',
         };
 
+        $details = [
+            'target_disk' => $benchmarkDir,
+            'cpu_score' => sprintf('%s SHA-256 ops/sec', number_format($opsPerSec)),
+            'disk_write_speed' => sprintf('%.1f MB/s (%d MB sample)', $writeSpeedMb, $safeSizeMb),
+            'disk_read_speed' => sprintf('%.1f MB/s (%d MB sample)', $readSpeedMb, $safeSizeMb),
+            'storage_tier' => $storageTier,
+            'driver' => $this->getDriverLabel(),
+        ];
+
+        if ($fallbackFrom !== null) {
+            $details['fallback_from'] = $fallbackFrom;
+        }
+
         return new ActionResult(
             success: true,
             message: 'messages.toolbox.benchmark_success',
-            details: [
-                'cpu_score' => sprintf('%s SHA-256 ops/sec', number_format($opsPerSec)),
-                'disk_write_speed' => sprintf('%.1f MB/s (%d MB sample)', $writeSpeedMb, $safeSizeMb),
-                'disk_read_speed' => sprintf('%.1f MB/s (%d MB sample)', $readSpeedMb, $safeSizeMb),
-                'storage_tier' => $storageTier,
-                'driver' => $this->getDriverLabel(),
-            ],
+            details: $details,
         );
+    }
+
+    /**
+     * Build a unique temporary file path inside the chosen benchmark directory.
+     */
+    protected function buildBenchmarkTempFilePath(string $directory, string $prefix): string
+    {
+        $cleanDir = rtrim($directory, '\\/');
+        if ($cleanDir === '') {
+            return DIRECTORY_SEPARATOR . $prefix . uniqid('', true) . '.tmp';
+        }
+
+        return $cleanDir . DIRECTORY_SEPARATOR . $prefix . uniqid('', true) . '.tmp';
     }
 
     /**
