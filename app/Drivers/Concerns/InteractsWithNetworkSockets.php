@@ -336,9 +336,7 @@ trait InteractsWithNetworkSockets
     public function auditEnvironmentPath(?string $customPathString = null): array
     {
         $rawPath = $customPathString ?? (string) (getenv('PATH') ?: ($_SERVER['PATH'] ?? ''));
-        $separator = str_contains($rawPath, ';') && ! str_contains($rawPath, ':')
-            ? ';'
-            : (PHP_OS_FAMILY === 'Windows' && $customPathString === null ? ';' : PATH_SEPARATOR);
+        $separator = $this->getEnvPathSeparator();
 
         $rawEntries = $rawPath !== '' ? explode($separator, $rawPath) : [];
 
@@ -355,7 +353,7 @@ trait InteractsWithNetworkSockets
                 continue;
             }
 
-            $normalizedKey = PHP_OS_FAMILY === 'Windows'
+            $normalizedKey = $separator === ';'
                 ? strtolower(rtrim($cleanPath, '\\/'))
                 : rtrim($cleanPath, '/');
 
@@ -401,5 +399,13 @@ trait InteractsWithNetworkSockets
                 'duplicate' => $duplicateCount,
             ],
         ];
+    }
+
+    /**
+     * Return the OS-specific PATH entry separator (';' on Windows, ':' on Linux).
+     */
+    protected function getEnvPathSeparator(): string
+    {
+        return PATH_SEPARATOR;
     }
 }

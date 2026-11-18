@@ -2083,4 +2083,12 @@ class LinuxDriver implements SystemDriverInterface
 
         return rtrim(mb_substr($clean, 0, $maxLength - 3)) . '...';
     }
+
+    /**
+     * Linux always uses ':' as the PATH directory separator.
+     */
+    protected function getEnvPathSeparator(): string
+    {
+        return ':';
+    }
 }

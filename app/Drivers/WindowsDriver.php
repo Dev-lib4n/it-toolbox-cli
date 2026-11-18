@@ -1316,4 +1316,12 @@ PS;
 
         return rtrim(mb_substr($clean, 0, $maxLength - 3)) . '...';
     }
+
+    /**
+     * Windows always uses ';' as the PATH directory separator.
+     */
+    protected function getEnvPathSeparator(): string
+    {
+        return ';';
+    }
 }
