@@ -52,12 +52,14 @@ class ReportExporterService
      * @param  string|null  $outputDirectory  Target directory (defaults to current working directory)
      * @param  string|null  $locale  Target locale ('en' or 'pt_BR')
      * @param  string|null  $timestamp  Optional fixed timestamp in 'Y-m-d-His' format
+     * @param  array<string, mixed>|null  $healthAudit  Optional health check score & recommendations payload
      */
     public function export(
         string $format = 'both',
         ?string $outputDirectory = null,
         ?string $locale = null,
         ?string $timestamp = null,
+        ?array $healthAudit = null,
     ): ActionResult {
         $activeLocale = $locale ?? (app()->getLocale() ?: 'en');
         app()->setLocale($activeLocale);
@@ -78,6 +80,9 @@ class ReportExporterService
         $baseFilename = sprintf('it-toolbox-report-%s', $stamp);
 
         $data = $this->collectDiagnostics($activeLocale);
+        if ($healthAudit !== null) {
+            $data['health_audit'] = $healthAudit;
+        }
         $writtenFiles = [];
 
         if ($normalizedFormat === 'md' || $normalizedFormat === 'both') {
@@ -136,11 +141,33 @@ class ReportExporterService
             '',
             sprintf('- **%s:** `%s`', (string) __('messages.app.detected_os', ['os' => (string) ($data['os_family'] ?? PHP_OS_FAMILY)]), (string) ($data['generated_at'] ?? gmdate('c'))),
             '',
-            sprintf('## %s', (string) __('messages.system.os_section')),
-            '',
-            sprintf('| %s | %s |', $metricHeader, $valueHeader),
-            '| :--- | :--- |',
         ];
+
+        if (isset($data['health_audit']) && is_array($data['health_audit'])) {
+            $audit = $data['health_audit'];
+            $lines[] = sprintf('## %s', (string) __('messages.health.section'));
+            $lines[] = '';
+            $lines[] = sprintf(
+                '- **%s:** `%s` (%s)',
+                (string) __('messages.health.score_label'),
+                (string) ($audit['progress_bar'] ?? ($audit['score'] ?? 100)),
+                (string) ($audit['state_label'] ?? '')
+            );
+
+            if (! empty($audit['recommendations']) && is_array($audit['recommendations'])) {
+                $lines[] = '';
+                $lines[] = sprintf('### %s', (string) __('messages.health.recommendations_title'));
+                foreach ($audit['recommendations'] as $rec) {
+                    $lines[] = sprintf('- %s', (string) $rec);
+                }
+            }
+            $lines[] = '';
+        }
+
+        $lines[] = sprintf('## %s', (string) __('messages.system.os_section'));
+        $lines[] = '';
+        $lines[] = sprintf('| %s | %s |', $metricHeader, $valueHeader);
+        $lines[] = '| :--- | :--- |';
 
         foreach ((array) ($data['os_info'] ?? []) as $key => $value) {
             $labelKey = "messages.system.fields.{$key}";

@@ -86,3 +86,61 @@ it('parses /etc/os-release, /proc/meminfo, df -P, ss -tulnp, and lpstat via Proc
         ->and($printers[0]['jobs'])->toBe('2')
         ->and($printers[0]['default'])->toBe('Yes');
 });
+
+it('parses Linux critical logs from journalctl JSON and falls back to syslog/empty logs cleanly', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $callIndex = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->callIndex++;
+
+            if ($this->callIndex === 1) {
+                $line1 = (string) json_encode([
+                    '__REALTIME_TIMESTAMP' => '1763460000000000',
+                    'PRIORITY' => '2',
+                    'SYSLOG_IDENTIFIER' => 'kernel',
+                    'MESSAGE' => 'EXT4-fs error (device sda1): ext4_find_entry:1455',
+                ]);
+                $line2 = (string) json_encode([
+                    '__REALTIME_TIMESTAMP' => '1763463600000000',
+                    'PRIORITY' => '3',
+                    'SYSLOG_IDENTIFIER' => 'sshd',
+                    'MESSAGE' => 'error: PAM: Authentication failure for root',
+                ]);
+
+                return new ProcessResult(0, $line1 . "\n" . $line2);
+            }
+
+            return new ProcessResult(0, '-- No entries --');
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new LinuxDriver($executor);
+
+    $logsResult = $driver->getCriticalLogs(15);
+    expect($logsResult->success)->toBeTrue()
+        ->and($logsResult->message)->toBe('messages.logs.fetched_success')
+        ->and($logsResult->details['count'])->toBe(2)
+        ->and($logsResult->details['events'][0]['level'])->toBe('CRITICAL')
+        ->and($logsResult->details['events'][0]['source'])->toBe('kernel')
+        ->and($logsResult->details['events'][1]['level'])->toBe('ERROR')
+        ->and($logsResult->details['events'][1]['source'])->toBe('sshd');
+
+    $emptyResult = $driver->getCriticalLogs(15);
+    expect($emptyResult->success)->toBeTrue()
+        ->and($emptyResult->message)->toBe('messages.logs.no_logs')
+        ->and($emptyResult->details['count'])->toBe(0)
+        ->and($emptyResult->details['events'])->toBeEmpty();
+});

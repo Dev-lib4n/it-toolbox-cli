@@ -17,11 +17,14 @@ O **IT Toolbox CLI (`it-toolbox`)** é um utilitário interativo de terminal (TU
 
 ## Funcionalidades
 
+- **🩺 Check-up Geral & Score de Saúde da Máquina (`health:check`):**
+  - Calcula um **Score de Saúde objetivo de 0 a 100 pontos** auditando consumo de RAM, armazenamento em disco, conectividade externa/DNS, fila de impressão e logs críticos do SO, classificando a máquina em **Saudável (`80–100`)**, **Atenção (`50–79`)** ou **Crítico (`0–49`)** com barra visual de integridade, checklist (`✅` / `⚠️` / `❌`) e recomendações práticas de correção.
 - **🖥 Diagnóstico de Sistema e Hardware (`system`):**
   - Inspeção de metadados do SO, versão do kernel, arquitetura, hostname e tempo de atividade (`uptime`).
   - Modelo da CPU, contagem de núcleos/threads, percentual de carga em tempo real e uso de memória RAM física.
   - Capacidade de volumes de armazenamento, espaço usado/livre e percentual de ocupação em sistemas de arquivos NTFS/ext4/btrfs/xfs.
   - Visualizador dos processos de maior consumo com opção interativa para encerrar tarefas travadas (`kill PID`).
+  - **Logs Críticos do SO & Erros Recentes (`system:logs`):** Inspeção de eventos críticos e erros registrados nas últimas 24 horas (`Get-WinEvent` no Windows / `journalctl -p err` e `/var/log/syslog` no Linux).
 - **🖨 Gerenciamento de Impressoras e Spooler (`printer`):**
   - Listagem de impressoras instaladas, detalhes de drivers, portas/URIs, impressora padrão e status da fila (`PowerShell Get-Printer` no Windows / `CUPS lpstat` no Linux).
   - Limpeza automatizada de fila de impressão e reinicialização do serviço de spooler (`net stop/start spooler` e limpeza de `PRINTERS` no Windows / `cancel -a` e `systemctl restart cups` no Linux).
@@ -33,9 +36,11 @@ O **IT Toolbox CLI (`it-toolbox`)** é um utilitário interativo de terminal (TU
 - **🧹 Manutenção e Limpeza do Sistema (`maintenance`):**
   - Limpeza segura de diretórios temporários de usuário e sistema (`%TEMP%`, `C:\Windows\Temp`, `/tmp`, `/var/tmp`, `~/.cache/thumbnails`), ignorando arquivos em uso/bloqueados com segurança e contabilizando o espaço em disco liberado.
 - **📄 Relatórios de Diagnóstico e Exportação (`report`):**
-  - Exportação de relatórios completos de diagnóstico de hardware, SO, impressoras e rede nos formatos `.txt` ou `.json` para anexação em chamados técnicos e auditorias.
+  - Exportação de relatórios completos de diagnóstico de hardware, SO, impressoras e rede nos formatos `.md` e `.json` para anexação em chamados técnicos e auditorias.
+- **⬆️ Auto-Atualização via GitHub Releases (`self:update`):**
+  - Consulta automaticamente a API do GitHub Releases em busca de novas versões e atualiza o binário em execução (`.exe`, binário Linux ou `.phar`) de forma atômica.
 - **🌍 Interface Bilíngue Nativa (`i18n`):**
-  - Suporte completo para **Inglês (`en`)** e **Português do Brasil (`pt_BR`)**, selecionável via flag `--lang=` ou dinamicamente dentro do menu interativo TUI.
+  - Suporte completo para **Inglês (`en`)** e **Português do Brasil (`pt_BR`)**, selecionável via flag `--lang=` ou dinamicamente dentro do menu interativo numérico TUI.
 
 ---
 
@@ -139,9 +144,11 @@ Cada módulo também pode ser executado diretamente em scripts ou sessões rápi
 
 | Comando | Módulo | Descrição | Opções |
 | :--- | :--- | :--- | :--- |
-| `php it-toolbox menu` | Core TUI | Inicia o menu principal interativo TUI (comando padrão) | `--lang=en\|pt_BR`, `--once` |
+| `php it-toolbox menu` | Core TUI | Inicia o menu principal interativo numérico TUI (comando padrão) | `--lang=en\|pt_BR`, `--once` |
+| `php it-toolbox health:check` | Saúde | Executa auditoria completa com Score de Saúde (0–100) e recomendações | `--export`, `--lang=en\|pt_BR` |
 | `php it-toolbox system:info` | Sistema | Exibe métricas de SO, CPU, RAM e saúde de discos | `--lang=en\|pt_BR` |
 | `php it-toolbox system:top` | Sistema | Lista os processos de maior consumo e permite encerrar um PID | `--limit=10`, `--lang=en\|pt_BR` |
+| `php it-toolbox system:logs` | Sistema | Exibe eventos críticos e erros de log do SO nas últimas 24 horas | `--limit=15`, `--lang=en\|pt_BR` |
 | `php it-toolbox printer:list` | Impressoras | Lista impressoras instaladas, drivers, portas e status | `--lang=en\|pt_BR` |
 | `php it-toolbox printer:clear` | Impressoras | Reinicia o Spooler / CUPS e limpa trabalhos de impressão travados | `--force`, `--lang=en\|pt_BR` |
 | `php it-toolbox network:check` | Rede | Inspeciona interfaces de rede e executa testes de ping e DNS | `--lang=en\|pt_BR` |
@@ -149,6 +156,7 @@ Cada módulo também pode ser executado diretamente em scripts ou sessões rápi
 | `php it-toolbox network:ports` | Rede | Lista portas TCP/UDP em escuta e seus respectivos processos | `--lang=en\|pt_BR` |
 | `php it-toolbox clean:temp` | Manutenção | Limpa diretórios temporários com segurança e exibe espaço liberado | `--force`, `--lang=en\|pt_BR` |
 | `php it-toolbox report:export` | Relatórios | Exporta relatório completo de diagnóstico em `.md` e/ou `.json` | `--format=md\|json\|both`, `--output=DIR`, `--lang=en\|pt_BR` |
+| `php it-toolbox self:update` | Core CLI | Verifica novas versões no GitHub Releases e auto-atualiza o binário | `--check`, `--lang=en\|pt_BR` |
 
 ---
 

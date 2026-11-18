@@ -57,6 +57,11 @@ it('generates localized Markdown (.md) and JSON (.json) diagnostic reports via R
             return new ActionResult(true, 'messages.system.process_killed_success');
         }
 
+        public function getCriticalLogs(int $limit = 15): ActionResult
+        {
+            return new ActionResult(true, 'messages.logs.no_logs', ['events' => [], 'count' => 0]);
+        }
+
         public function listPrinters(): array
         {
             return [

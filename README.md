@@ -17,11 +17,14 @@
 
 ## Features
 
+- **🩺 Full Machine Health Check & Score (`health:check`):**
+  - Calculates an objective **0–100 Health Score** across RAM usage, disk storage, internet/DNS connectivity, print queue state, and critical OS logs, classifying the workstation into **Healthy (`80–100`)**, **Warning (`50–79`)**, or **Critical (`0–49`)** with visual progress bar, checklist (`✅` / `⚠️` / `❌`), and actionable remediation recommendations.
 - **🖥 System & Hardware Diagnostics (`system`):**
   - Inspect OS metadata, kernel version, architecture, hostname, and system uptime.
   - Real-time CPU model, core/thread count, load percentage, and physical RAM usage.
   - Storage volume capacity, used/free space, and usage percentages across NTFS/ext4/btrfs/xfs filesystems.
   - Top resource-consuming processes viewer with interactive frozen process termination (`PID` kill).
+  - **Critical OS Logs & Recent Errors (`system:logs`):** Inspect critical and error events recorded in the last 24 hours (`Get-WinEvent` on Windows / `journalctl -p err` & `/var/log/syslog` on Linux).
 - **🖨 Printers & Spooler Management (`printer`):**
   - List installed printers, driver details, ports/URIs, default status, and queue states (`PowerShell Get-Printer` on Windows / `CUPS lpstat` on Linux).
   - One-step print queue purge and spooler service restart (`net stop/start spooler` & `PRINTERS` cleanup on Windows / `cancel -a` & `systemctl restart cups` on Linux).
@@ -33,9 +36,11 @@
 - **🧹 System Maintenance & Cleanup (`maintenance`):**
   - Safe cleanup of user and system temporary directories (`%TEMP%`, `C:\Windows\Temp`, `/tmp`, `/var/tmp`, `~/.cache/thumbnails`), gracefully skipping locked/in-use files and reporting freed disk space.
 - **📄 Diagnostic Reports & Export (`report`):**
-  - Export complete hardware, OS, printer, and network diagnostic snapshots to structured `.txt` or `.json` files for ticketing systems and audit logs.
+  - Export complete hardware, OS, printer, and network diagnostic snapshots to structured `.md` and `.json` files for ticketing systems and audit logs.
+- **⬆️ Over-the-Air Self-Update (`self:update`):**
+  - Automatically queries GitHub Releases for newer versions and atomically updates the running standalone binary (`.exe`, Linux ELF, or `.phar`) in-place.
 - **🌍 Native Bilingual Interface (`i18n`):**
-  - Full support for **English (`en`)** and **Brazilian Portuguese (`pt_BR`)**, selectable via `--lang=` flag or dynamically inside the interactive TUI menu.
+  - Full support for **English (`en`)** and **Brazilian Portuguese (`pt_BR`)**, selectable via `--lang=` flag or dynamically inside the interactive numeric TUI menu.
 
 ---
 
@@ -139,9 +144,11 @@ Every module can also be executed directly in headless/CLI scripts or terminal s
 
 | Command | Module | Description | Options |
 | :--- | :--- | :--- | :--- |
-| `php it-toolbox menu` | Core TUI | Launch the interactive TUI main menu (default command) | `--lang=en\|pt_BR`, `--once` |
+| `php it-toolbox menu` | Core TUI | Launch the interactive numeric TUI main menu (default command) | `--lang=en\|pt_BR`, `--once` |
+| `php it-toolbox health:check` | Health | Run a full machine health audit with a 0–100 score and recommendations | `--export`, `--lang=en\|pt_BR` |
 | `php it-toolbox system:info` | System | Display OS, CPU, RAM, and disk health metrics | `--lang=en\|pt_BR` |
 | `php it-toolbox system:top` | System | List top processes by resource usage and optionally kill a PID | `--limit=10`, `--lang=en\|pt_BR` |
+| `php it-toolbox system:logs` | System | Inspect critical and error OS log events from the last 24 hours | `--limit=15`, `--lang=en\|pt_BR` |
 | `php it-toolbox printer:list` | Printers | List installed printers, drivers, ports, and status | `--lang=en\|pt_BR` |
 | `php it-toolbox printer:clear` | Printers | Restart print spooler / CUPS and purge stuck print jobs | `--force`, `--lang=en\|pt_BR` |
 | `php it-toolbox network:check` | Network | Inspect network interfaces and run ping/DNS health checks | `--lang=en\|pt_BR` |
@@ -149,6 +156,7 @@ Every module can also be executed directly in headless/CLI scripts or terminal s
 | `php it-toolbox network:ports` | Network | List active listening TCP/UDP ports and owning processes | `--lang=en\|pt_BR` |
 | `php it-toolbox clean:temp` | Maintenance | Safely purge temporary files and report freed space | `--force`, `--lang=en\|pt_BR` |
 | `php it-toolbox report:export` | Reports | Export full system diagnostic report to `.md` and/or `.json` | `--format=md\|json\|both`, `--output=DIR`, `--lang=en\|pt_BR` |
+| `php it-toolbox self:update` | Core CLI | Check GitHub Releases and self-update the running executable | `--check`, `--lang=en\|pt_BR` |
 
 ---
 

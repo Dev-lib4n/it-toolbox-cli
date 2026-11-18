@@ -30,16 +30,19 @@ return [
         'back' => '← Voltar ao Menu Principal',
         'exit' => '✖ Sair do IT Toolbox',
         'categories' => [
+            'health_check' => '🩺 Check-up Geral & Score de Saúde (health:check)',
             'system' => '🖥  Diagnóstico de Sistema & Hardware',
             'printers' => '🖨  Impressoras & Spooler',
             'network' => '🌐 Rede & Conectividade',
             'maintenance' => '🧹 Limpeza & Manutenção',
             'reports' => '📄 Exportar Relatório de Atendimento',
+            'self_update' => '⬆️  Verificar Atualizações (self:update)',
             'language' => '🌍 Alterar Idioma (EN / PT-BR)',
         ],
         'actions' => [
             'system_info' => 'Exibir SO, CPU, RAM e Saúde de Discos (system:info)',
             'system_top' => 'Inspecionar Processos e Encerrar Tarefas Travadas (system:top)',
+            'system_logs' => 'Logs Críticos do SO & Erros Recentes (system:logs)',
             'printer_list' => 'Listar Impressoras Instaladas e Status (printer:list)',
             'printer_clear' => 'Reiniciar Spooler e Limpar Fila de Impressão (printer:clear)',
             'network_check' => 'Interfaces e Teste de Saúde de Conectividade (network:check)',
@@ -63,8 +66,10 @@ return [
     ],
 
     'spinners' => [
+        'health_check' => 'Executando auditoria completa de saúde e calculando score...',
         'system_info' => 'Coletando métricas de SO, hardware e armazenamento...',
         'system_top' => 'Consultando processos com maior consumo de recursos...',
+        'system_logs' => 'Analisando logs do SO em busca de erros críticos nas últimas 24h...',
         'killing_process' => 'Encerrando processo PID :pid...',
         'printer_list' => 'Consultando impressoras instaladas e status do spooler...',
         'printer_clear' => 'Parando spooler, limpando fila e reiniciando serviço...',
@@ -73,6 +78,8 @@ return [
         'network_ports' => 'Escaneando portas TCP/UDP ativas em escuta...',
         'clean_temp' => 'Analisando e removendo arquivos temporários com segurança...',
         'report_export' => 'Gerando relatório completo de diagnóstico...',
+        'self_update_check' => 'Consultando GitHub Releases por novas versões...',
+        'self_update_download' => 'Baixando e instalando atualização v:version...',
     ],
 
     'system' => [
@@ -114,6 +121,66 @@ return [
         'confirm_kill' => 'Tem certeza de que deseja forçar o encerramento do PID :pid (:name)?',
         'process_killed_success' => 'Processo encerrado com sucesso.',
         'process_killed_failed' => 'Falha ao encerrar o processo selecionado.',
+    ],
+
+    'logs' => [
+        'section' => 'Logs Críticos do SO & Erros Recentes (Últimas 24 Horas)',
+        'fetched_success' => 'Eventos críticos de log do SO coletados com sucesso.',
+        'no_logs' => 'Nenhum evento crítico ou erro registrado nas últimas 24 horas.',
+        'headers' => [
+            'timestamp' => 'Data / Hora',
+            'level' => 'Nível',
+            'source' => 'Origem / Serviço',
+            'message' => 'Resumo da Mensagem',
+        ],
+    ],
+
+    'health' => [
+        'section' => 'Check-up Geral & Score de Saúde da Máquina',
+        'score_label' => 'Score de Saúde',
+        'states' => [
+            'healthy' => 'Saudável',
+            'warning' => 'Atenção',
+            'critical' => 'Crítico',
+        ],
+        'categories' => [
+            'ram' => 'Memória (RAM)',
+            'storage' => 'Armazenamento (Discos)',
+            'network' => 'Conectividade & DNS',
+            'printers' => 'Spooler & Fila de Impressão',
+            'logs' => 'Logs Críticos do SO (24h)',
+        ],
+        'headers' => [
+            'category' => 'Categoria Auditada',
+            'status' => 'Estado',
+            'summary' => 'Métricas Observadas',
+            'impact' => 'Impacto no Score',
+        ],
+        'logs_count_summary' => ':count eventos críticos/erros nas últimas 24h',
+        'recommendations_title' => 'Recomendações Práticas de Ação:',
+        'no_recommendations' => 'Todos os testes de integridade passaram sem problemas detectados.',
+        'ask_export' => 'Deseja exportar este check-up e o relatório completo de diagnóstico (MD + JSON)?',
+        'recommendations' => [
+            'high_ram' => 'Alto consumo de memória detectado. Execute "system:top" para inspecionar e encerrar processos pesados.',
+            'high_disk' => 'Uso de disco acima de 85%. Execute "clean:temp" para liberar espaço de arquivos temporários.',
+            'no_internet' => 'Sem conectividade externa à internet. Execute "network:check" para verificar adaptador e gateway.',
+            'dns_failed' => 'Falha de resolução DNS detectada. Execute "network:flush" para limpar o cache DNS e renovar a rede.',
+            'printer_issue' => 'Trabalhos de impressão retidos ou erro no spooler. Execute "printer:clear" para reiniciar a fila.',
+            'critical_logs' => 'Erros críticos recentes encontrados no SO. Execute "system:logs" para investigar os serviços afetados.',
+        ],
+    ],
+
+    'update' => [
+        'section' => 'Auto-Atualização do IT Toolbox CLI',
+        'up_to_date' => 'Você já está utilizando a versão mais recente (v:version).',
+        'available' => 'Nova versão disponível! Atual: v:current -> Mais recente: v:latest',
+        'confirm_download' => 'Deseja baixar e instalar a versão v:version (:asset) agora?',
+        'updated_success' => 'O IT Toolbox CLI foi atualizado com sucesso!',
+        'check_failed' => 'Não foi possível verificar atualizações no GitHub Releases. Verifique sua conexão.',
+        'asset_not_found' => 'O artefato correspondente à sua plataforma não foi encontrado na última Release.',
+        'download_failed' => 'Falha ao baixar o binário atualizado do GitHub.',
+        'replace_failed' => 'Falha ao substituir o executável atual. Verifique as permissões de escrita.',
+        'source_mode_warning' => 'Executando via código-fonte em modo de desenvolvimento. Utilize "git pull && composer install" para atualizar.',
     ],
 
     'printer' => [
@@ -181,6 +248,13 @@ return [
             'commands_executed' => 'Comandos Executados',
             'output' => 'Saída do Comando',
             'error' => 'Detalhes do Erro',
+            'current_version' => 'Versão Atual',
+            'latest_version' => 'Versão Mais Recente',
+            'previous_version' => 'Versão Anterior',
+            'new_version' => 'Versão Instalada',
+            'asset_name' => 'Artefato da Release',
+            'download_url' => 'URL de Download',
+            'count' => 'Total de Eventos',
         ],
     ],
 

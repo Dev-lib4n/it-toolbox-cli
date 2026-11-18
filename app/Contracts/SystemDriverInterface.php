@@ -46,6 +46,14 @@ interface SystemDriverInterface
     public function killProcess(int $pid): ActionResult;
 
     /**
+     * Retrieve recent critical and error events from the OS event log / journal (last 24 hours).
+     *
+     * @param  int  $limit
+     * @return ActionResult
+     */
+    public function getCriticalLogs(int $limit = 15): ActionResult;
+
+    /**
      * List installed printers, their current status, and pending print jobs.
      *
      * @return array<int, array{name: string, status: string, default: string, driver: string, port: string, jobs?: string}>
