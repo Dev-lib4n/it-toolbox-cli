@@ -1,0 +1,22 @@
+{
+    "chmod": "0755",
+    "main": "it-toolbox",
+    "output-path": "builds/it-toolbox",
+    "directories": [
+        "app",
+        "bootstrap",
+        "config",
+        "lang",
+        "vendor"
+    ],
+    "files": [
+        "composer.json",
+        "LICENSE"
+    ],
+    "exclude-composer-artifacts": false,
+    "compression": "GZ",
+    "compactors": [
+        "KevinGH\\Box\\Compactor\\Php",
+        "KevinGH\\Box\\Compactor\\Json"
+    ]
+}
