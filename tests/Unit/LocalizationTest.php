@@ -11,10 +11,17 @@ it('ensures lang/en/messages.php and lang/pt_BR/messages.php have identical keys
     $enFlat = Arr::dot($en);
     $ptBrFlat = Arr::dot($ptBr);
 
+    $enKeys = array_keys($enFlat);
+    $ptBrKeys = array_keys($ptBrFlat);
+
+    sort($enKeys);
+    sort($ptBrKeys);
+
     $missingInPtBr = array_diff_key($enFlat, $ptBrFlat);
     $missingInEn = array_diff_key($ptBrFlat, $enFlat);
 
-    expect($missingInPtBr)->toBeEmpty()
+    expect($ptBrKeys)->toEqual($enKeys)
+        ->and($missingInPtBr)->toBeEmpty()
         ->and($missingInEn)->toBeEmpty()
         ->and(count($enFlat))->toBe(count($ptBrFlat));
 
@@ -27,7 +34,7 @@ it('ensures lang/en/messages.php and lang/pt_BR/messages.php have identical keys
     }
 });
 
-it('switches translator output dynamically between en and pt_BR', function (): void {
+it('switches translator output dynamically between en and pt_BR locales', function (): void {
     app()->setLocale('en');
     app('translator')->setLocale('en');
 

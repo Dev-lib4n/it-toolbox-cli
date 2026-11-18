@@ -6,7 +6,7 @@ namespace App\Contracts;
 
 use App\DTOs\ProcessResult;
 
-interface ProcessExecutorInterface extends ProcessRunnerInterface
+interface ProcessExecutorInterface
 {
     /**
      * Execute an external OS command safely using an array of arguments.

@@ -19,9 +19,9 @@ it('resolves LinuxDriver when OS family is Linux', function (): void {
     expect($driver)->toBeInstanceOf(LinuxDriver::class);
 });
 
-it('throws RuntimeException for unsupported OS family', function (): void {
-    SystemDriverFactory::make('Solaris');
-})->throws(RuntimeException::class, 'Unsupported operating system family: Solaris');
+it('throws RuntimeException for unsupported OS families', function (string $unsupportedOs): void {
+    SystemDriverFactory::make($unsupportedOs);
+})->with(['Solaris', 'FreeBSD', 'Darwin'])->throws(RuntimeException::class);
 
 it('creates an immutable ActionResult DTO', function (): void {
     $result = new ActionResult(
