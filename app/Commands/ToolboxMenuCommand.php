@@ -8,6 +8,7 @@ use App\Commands\Concerns\InteractsWithLocale;
 use App\Commands\Concerns\InteractsWithTerminal;
 use Laravel\Prompts\Prompt;
 use LaravelZero\Framework\Commands\Command;
+use Symfony\Component\Process\Process;
 use Throwable;
 
 use function Laravel\Prompts\error;
@@ -287,6 +288,48 @@ class ToolboxMenuCommand extends Command
             $this->restoreTerminal();
         }
 
-        $this->waitForKeyPress();
+        $this->pauseBeforeReturn();
+    }
+
+    /**
+     * Display an explicit highlighted return prompt and pause before clearing the screen and returning to the menu.
+     */
+    protected function pauseBeforeReturn(): void
+    {
+        if (! isset($this->input) || ! $this->input->isInteractive()) {
+            return;
+        }
+
+        $this->restoreTerminal();
+        $this->drainInputBuffer();
+
+        $prompt = (string) __('messages.menu.press_any_key');
+        $this->output->writeln('');
+        $this->output->write(sprintf('  <fg=yellow;options=bold>%s</> ', $prompt));
+
+        $stdin = defined('STDIN') && is_resource(STDIN) ? STDIN : @fopen('php://stdin', 'rb');
+        if (! is_resource($stdin)) {
+            $this->output->writeln('');
+
+            return;
+        }
+
+        if (PHP_OS_FAMILY !== 'Windows' && $this->isInteractiveTty() && Process::isTtySupported()) {
+            if ($this->setUnixSttyMode(['-icanon', '-echo'])) {
+                try {
+                    @stream_set_blocking($stdin, true);
+                    @fread($stdin, 1);
+                } finally {
+                    $this->restoreTerminal();
+                }
+                $this->output->writeln('');
+
+                return;
+            }
+        }
+
+        @stream_set_blocking($stdin, true);
+        @fgets($stdin);
+        $this->output->writeln('');
     }
 }

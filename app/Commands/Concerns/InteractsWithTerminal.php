@@ -52,8 +52,12 @@ trait InteractsWithTerminal
             @sapi_windows_vt100_support(STDOUT, true);
         }
 
-        fwrite(STDOUT, "\033[2J\033[H\033[3J");
-        fflush(STDOUT);
+        if (isset($this->output)) {
+            $this->output->write("\033[2J\033[H\033[3J");
+        } else {
+            fwrite(STDOUT, "\033[2J\033[H\033[3J");
+            fflush(STDOUT);
+        }
     }
 
     /**
@@ -71,11 +75,11 @@ trait InteractsWithTerminal
     }
 
     /**
-     * Drain any leftover buffered newline/keystroke bytes from STDIN before waiting for user confirmation.
+     * Drain any leftover buffered newline/keystroke bytes from STDIN on Unix TTYs before waiting for input.
      */
     protected function drainInputBuffer(): void
     {
-        if (! defined('STDIN') || ! is_resource(STDIN) || ! $this->isInteractiveTty()) {
+        if (PHP_OS_FAMILY === 'Windows' || ! defined('STDIN') || ! is_resource(STDIN) || ! $this->isInteractiveTty()) {
             return;
         }
 
@@ -170,45 +174,6 @@ trait InteractsWithTerminal
         );
 
         return trim($selected);
-    }
-
-    /**
-     * Pause execution after running a submenu command until the user presses Enter or any key.
-     */
-    protected function waitForKeyPress(): void
-    {
-        if (! isset($this->input) || ! $this->input->isInteractive()) {
-            return;
-        }
-
-        if (! defined('STDIN') || ! defined('STDOUT')) {
-            return;
-        }
-
-        $this->restoreTerminal();
-        $this->drainInputBuffer();
-
-        $prompt = (string) __('messages.menu.press_any_key');
-        fwrite(STDOUT, PHP_EOL . '  ' . $prompt . ' ');
-        fflush(STDOUT);
-
-        if (PHP_OS_FAMILY !== 'Windows' && $this->isInteractiveTty() && Process::isTtySupported()) {
-            if ($this->setUnixSttyMode(['-icanon', '-echo'])) {
-                try {
-                    @stream_set_blocking(STDIN, true);
-                    @fread(STDIN, 1);
-                } finally {
-                    $this->restoreTerminal();
-                }
-                fwrite(STDOUT, PHP_EOL);
-                fflush(STDOUT);
-
-                return;
-            }
-        }
-
-        @stream_set_blocking(STDIN, true);
-        @fgets(STDIN);
     }
 
     /**

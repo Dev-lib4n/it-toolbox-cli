@@ -26,7 +26,7 @@ return [
         'sub_prompt' => 'Selecione uma operação:',
         'numeric_hint' => 'Digite o número da opção (:options)',
         'invalid_option' => 'Opção inválida. Digite um dos números disponíveis (:options).',
-        'press_any_key' => 'Pressione Enter ou qualquer tecla para voltar...',
+        'press_any_key' => '[Enter] ou [0] para voltar ao menu...',
         'back' => '← Voltar ao Menu Principal',
         'exit' => '✖ Sair do IT Toolbox',
         'categories' => [

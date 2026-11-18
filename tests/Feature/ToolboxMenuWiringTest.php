@@ -67,5 +67,9 @@ it('verifies all submenu label translation keys exist in both en and pt_BR', fun
                     ->and($translated)->not->toBeEmpty();
             }
         }
+
+        $returnPrompt = (string) __('messages.menu.press_any_key');
+        expect($returnPrompt)->toContain('[Enter]')
+            ->and($returnPrompt)->toContain('[0]');
     }
 });

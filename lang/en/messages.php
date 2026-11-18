@@ -26,7 +26,7 @@ return [
         'sub_prompt' => 'Select an operation:',
         'numeric_hint' => 'Enter an option number (:options)',
         'invalid_option' => 'Invalid option. Please enter one of the available numbers (:options).',
-        'press_any_key' => 'Press Enter or any key to return...',
+        'press_any_key' => 'Press [Enter] or [0] to return to menu...',
         'back' => '← Back to Main Menu',
         'exit' => '✖ Exit IT Toolbox',
         'categories' => [
