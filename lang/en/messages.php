@@ -1,0 +1,186 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'app' => [
+        'name' => 'IT Toolbox CLI',
+        'tagline' => 'Cross-Platform IT Support & System Diagnostics Suite',
+        'detected_os' => 'Detected OS Family: :os',
+        'goodbye' => 'Thank you for using IT Toolbox CLI. Goodbye!',
+    ],
+
+    'language' => [
+        'select_prompt' => 'Select your preferred interface language / Selecione o idioma:',
+        'en' => 'English (en)',
+        'pt_BR' => 'Português - Brasil (pt_BR)',
+        'switched' => 'Language switched to English (en).',
+        'invalid' => 'Unsupported language ":lang". Falling back to English (en).',
+    ],
+
+    'menu' => [
+        'main_prompt' => 'Select a module or action:',
+        'sub_prompt' => 'Select an operation:',
+        'back' => '← Back to Main Menu',
+        'exit' => '✖ Exit IT Toolbox',
+        'categories' => [
+            'system' => '🖥  System & Hardware Diagnostics',
+            'printers' => '🖨  Printers & Spooler Management',
+            'network' => '🌐 Network & Connectivity Diagnostics',
+            'maintenance' => '🧹 System Maintenance & Cleanup',
+            'reports' => '📄 Diagnostic Reports & Export',
+            'language' => '🌍 Switch Language (English / Português)',
+        ],
+        'actions' => [
+            'system_info' => 'View OS, CPU, RAM & Storage Health (system:info)',
+            'system_top' => 'Inspect Top Processes & Kill Frozen Tasks (system:top)',
+            'printer_list' => 'List Installed Printers & Status (printer:list)',
+            'printer_clear' => 'Restart Spooler & Clear Print Queue (printer:clear)',
+            'network_check' => 'Interfaces & Connectivity Health Check (network:check)',
+            'network_flush' => 'Flush DNS Cache & Renew IP Lease (network:flush)',
+            'network_ports' => 'Inspect Open Listening Ports (network:ports)',
+            'clean_temp' => 'Clean System & User Temporary Files (clean:temp)',
+            'report_export' => 'Export Full System Diagnostic Report (report:export)',
+        ],
+    ],
+
+    'common' => [
+        'metric' => 'Metric',
+        'value' => 'Value',
+        'status' => 'Status',
+        'details' => 'Operation Details',
+        'yes' => 'Yes',
+        'no' => 'No',
+        'cancelled' => 'Operation cancelled by user.',
+        'permission_denied' => 'Insufficient privileges. Please run IT Toolbox as Administrator (Windows) or with sudo (Linux).',
+        'unexpected_error' => 'An unexpected error occurred: :error',
+    ],
+
+    'spinners' => [
+        'system_info' => 'Collecting OS, hardware, and storage metrics...',
+        'system_top' => 'Querying top resource-consuming processes...',
+        'killing_process' => 'Terminating process PID :pid...',
+        'printer_list' => 'Querying installed printers and spooler status...',
+        'printer_clear' => 'Stopping spooler, purging queue, and restarting service...',
+        'network_check' => 'Inspecting network interfaces and testing connectivity...',
+        'network_flush' => 'Flushing DNS resolver cache and renewing network lease...',
+        'network_ports' => 'Scanning active listening TCP/UDP ports...',
+        'clean_temp' => 'Scanning and removing temporary files safely...',
+        'report_export' => 'Generating full diagnostic report...',
+    ],
+
+    'system' => [
+        'os_section' => 'Operating System Information',
+        'hardware_section' => 'CPU & Memory Diagnostics',
+        'storage_section' => 'Storage Volumes & Disk Health',
+        'processes_section' => 'Top Active Processes',
+        'fields' => [
+            'os_name' => 'OS Name',
+            'os_version' => 'OS Version',
+            'kernel' => 'Kernel',
+            'architecture' => 'Architecture',
+            'hostname' => 'Hostname',
+            'uptime' => 'System Uptime',
+            'cpu_model' => 'CPU Model',
+            'cpu_cores' => 'CPU Cores / Threads',
+            'cpu_load' => 'CPU Load',
+            'ram_total' => 'Total RAM',
+            'ram_used' => 'Used RAM',
+            'ram_free' => 'Available RAM',
+        ],
+        'storage_headers' => [
+            'filesystem' => 'Filesystem',
+            'total' => 'Total',
+            'used' => 'Used',
+            'available' => 'Available',
+            'usage_percent' => 'Usage %',
+            'mount' => 'Mount Point',
+        ],
+        'process_headers' => [
+            'pid' => 'PID',
+            'name' => 'Process Name',
+            'cpu' => 'CPU',
+            'memory' => 'Memory',
+        ],
+        'no_processes' => 'No active processes returned by the system driver.',
+        'ask_kill_prompt' => 'Would you like to terminate one of these processes?',
+        'select_process_prompt' => 'Select the process to terminate:',
+        'confirm_kill' => 'Are you sure you want to force-terminate PID :pid (:name)?',
+        'process_killed_success' => 'Process terminated successfully.',
+        'process_killed_failed' => 'Failed to terminate the selected process.',
+    ],
+
+    'printer' => [
+        'list_section' => 'Installed Printers & Spooler Status',
+        'headers' => [
+            'name' => 'Printer Name',
+            'status' => 'Status',
+            'default' => 'Default',
+            'driver' => 'Driver',
+            'port' => 'Port / URI',
+        ],
+        'no_printers' => 'No printers found on this system.',
+        'confirm_clear' => 'This will restart the Print Spooler / CUPS service and delete all pending print jobs. Proceed?',
+        'queue_cleared_success' => 'Print spooler restarted and pending print queue cleared successfully.',
+        'queue_cleared_failed' => 'Failed to clear print queue. Verify administrator/sudo permissions.',
+    ],
+
+    'network' => [
+        'interfaces_section' => 'Active Network Interfaces',
+        'connectivity_section' => 'Connectivity & DNS Health Check',
+        'ports_section' => 'Active Listening Ports (TCP/UDP)',
+        'interface_headers' => [
+            'interface' => 'Interface',
+            'ipv4' => 'IPv4 Address',
+            'ipv6' => 'IPv6 Address',
+            'mac' => 'MAC Address',
+            'status' => 'State',
+        ],
+        'connectivity_headers' => [
+            'target' => 'Target',
+            'check' => 'Check Type',
+            'status' => 'Result',
+            'latency' => 'Latency',
+        ],
+        'port_headers' => [
+            'protocol' => 'Protocol',
+            'local_address' => 'Local Address',
+            'port' => 'Port',
+            'pid' => 'PID',
+            'process' => 'Process',
+        ],
+        'no_interfaces' => 'No active network interfaces detected.',
+        'no_ports' => 'No listening ports detected.',
+        'confirm_flush' => 'This will flush the DNS cache and renew network configuration (may briefly interrupt active connections). Proceed?',
+        'flush_success' => 'DNS cache flushed and network configuration renewed successfully.',
+        'flush_failed' => 'Failed to flush DNS or renew network configuration.',
+    ],
+
+    'maintenance' => [
+        'clean_section' => 'Temporary Files Cleanup',
+        'confirm_clean' => 'Are you sure you want to clean temporary directories (%TEMP%, /tmp, caches)? Locked files in use will be skipped.',
+        'clean_success' => 'Temporary directories cleaned successfully.',
+        'clean_failed' => 'Failed to complete temporary files cleanup.',
+        'details_labels' => [
+            'deleted_files' => 'Deleted Files',
+            'skipped_locked_files' => 'Skipped (In Use / Locked)',
+            'freed_space' => 'Freed Disk Space',
+            'paths' => 'Target Paths',
+            'driver' => 'OS Driver',
+            'service' => 'Service',
+            'pid' => 'Process ID (PID)',
+            'commands_executed' => 'Commands Executed',
+        ],
+    ],
+
+    'report' => [
+        'section' => 'Diagnostic Report Export',
+        'format_prompt' => 'Select the export format for the diagnostic report:',
+        'formats' => [
+            'txt' => 'Plain Text (.txt)',
+            'json' => 'JSON Document (.json)',
+        ],
+        'exported_success' => 'Diagnostic report exported successfully to: :path',
+        'exported_failed' => 'Failed to write diagnostic report to disk: :path',
+    ],
+];

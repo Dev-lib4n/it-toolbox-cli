@@ -1,0 +1,186 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'app' => [
+        'name' => 'IT Toolbox CLI',
+        'tagline' => 'Suíte Multiplataforma de Suporte Técnico e Diagnóstico de Sistemas',
+        'detected_os' => 'Família de SO Detectada: :os',
+        'goodbye' => 'Obrigado por utilizar o IT Toolbox CLI. Até logo!',
+    ],
+
+    'language' => [
+        'select_prompt' => 'Selecione o idioma da interface / Select your preferred language:',
+        'en' => 'English (en)',
+        'pt_BR' => 'Português - Brasil (pt_BR)',
+        'switched' => 'Idioma alterado para Português - Brasil (pt_BR).',
+        'invalid' => 'Idioma ":lang" não suportado. Utilizando o padrão English (en).',
+    ],
+
+    'menu' => [
+        'main_prompt' => 'Selecione um módulo ou ação:',
+        'sub_prompt' => 'Selecione uma operação:',
+        'back' => '← Voltar ao Menu Principal',
+        'exit' => '✖ Sair do IT Toolbox',
+        'categories' => [
+            'system' => '🖥  Diagnóstico de Sistema e Hardware',
+            'printers' => '🖨  Gerenciamento de Impressoras e Spooler',
+            'network' => '🌐 Diagnóstico de Rede e Conectividade',
+            'maintenance' => '🧹 Manutenção e Limpeza do Sistema',
+            'reports' => '📄 Relatórios de Diagnóstico e Exportação',
+            'language' => '🌍 Alternar Idioma (Português / English)',
+        ],
+        'actions' => [
+            'system_info' => 'Exibir SO, CPU, RAM e Saúde de Discos (system:info)',
+            'system_top' => 'Inspecionar Processos e Encerrar Tarefas Travadas (system:top)',
+            'printer_list' => 'Listar Impressoras Instaladas e Status (printer:list)',
+            'printer_clear' => 'Reiniciar Spooler e Limpar Fila de Impressão (printer:clear)',
+            'network_check' => 'Interfaces e Teste de Saúde de Conectividade (network:check)',
+            'network_flush' => 'Limpar Cache DNS e Renovar Concessão de IP (network:flush)',
+            'network_ports' => 'Inspecionar Portas Abertas em Escuta (network:ports)',
+            'clean_temp' => 'Limpar Arquivos Temporários do Sistema e Usuário (clean:temp)',
+            'report_export' => 'Exportar Relatório Completo de Diagnóstico (report:export)',
+        ],
+    ],
+
+    'common' => [
+        'metric' => 'Métrica',
+        'value' => 'Valor',
+        'status' => 'Status',
+        'details' => 'Detalhes da Operação',
+        'yes' => 'Sim',
+        'no' => 'Não',
+        'cancelled' => 'Operação cancelada pelo usuário.',
+        'permission_denied' => 'Privilégios insuficientes. Execute o IT Toolbox como Administrador (Windows) ou com sudo (Linux).',
+        'unexpected_error' => 'Ocorreu um erro inesperado: :error',
+    ],
+
+    'spinners' => [
+        'system_info' => 'Coletando métricas de SO, hardware e armazenamento...',
+        'system_top' => 'Consultando processos com maior consumo de recursos...',
+        'killing_process' => 'Encerrando processo PID :pid...',
+        'printer_list' => 'Consultando impressoras instaladas e status do spooler...',
+        'printer_clear' => 'Parando spooler, limpando fila e reiniciando serviço...',
+        'network_check' => 'Inspecionando interfaces de rede e testando conectividade...',
+        'network_flush' => 'Limpando cache de resolução DNS e renovando IP...',
+        'network_ports' => 'Escaneando portas TCP/UDP ativas em escuta...',
+        'clean_temp' => 'Analisando e removendo arquivos temporários com segurança...',
+        'report_export' => 'Gerando relatório completo de diagnóstico...',
+    ],
+
+    'system' => [
+        'os_section' => 'Informações do Sistema Operacional',
+        'hardware_section' => 'Diagnóstico de CPU e Memória RAM',
+        'storage_section' => 'Volumes de Armazenamento e Saúde de Discos',
+        'processes_section' => 'Principais Processos Ativos',
+        'fields' => [
+            'os_name' => 'Nome do SO',
+            'os_version' => 'Versão do SO',
+            'kernel' => 'Kernel',
+            'architecture' => 'Arquitetura',
+            'hostname' => 'Nome do Host',
+            'uptime' => 'Tempo de Atividade (Uptime)',
+            'cpu_model' => 'Modelo da CPU',
+            'cpu_cores' => 'Núcleos / Threads da CPU',
+            'cpu_load' => 'Carga da CPU',
+            'ram_total' => 'RAM Total',
+            'ram_used' => 'RAM em Uso',
+            'ram_free' => 'RAM Disponível',
+        ],
+        'storage_headers' => [
+            'filesystem' => 'Sistema de Arquivos',
+            'total' => 'Total',
+            'used' => 'Usado',
+            'available' => 'Disponível',
+            'usage_percent' => 'Uso %',
+            'mount' => 'Ponto de Montagem',
+        ],
+        'process_headers' => [
+            'pid' => 'PID',
+            'name' => 'Nome do Processo',
+            'cpu' => 'CPU',
+            'memory' => 'Memória',
+        ],
+        'no_processes' => 'Nenhum processo ativo retornado pelo driver do sistema.',
+        'ask_kill_prompt' => 'Deseja encerrar algum destes processos?',
+        'select_process_prompt' => 'Selecione o processo que deseja encerrar:',
+        'confirm_kill' => 'Tem certeza de que deseja forçar o encerramento do PID :pid (:name)?',
+        'process_killed_success' => 'Processo encerrado com sucesso.',
+        'process_killed_failed' => 'Falha ao encerrar o processo selecionado.',
+    ],
+
+    'printer' => [
+        'list_section' => 'Impressoras Instaladas e Status do Spooler',
+        'headers' => [
+            'name' => 'Nome da Impressora',
+            'status' => 'Status',
+            'default' => 'Padrão',
+            'driver' => 'Driver',
+            'port' => 'Porta / URI',
+        ],
+        'no_printers' => 'Nenhuma impressora encontrada neste sistema.',
+        'confirm_clear' => 'Isto reiniciará o serviço Spooler de Impressão / CUPS e removerá todos os trabalhos pendentes. Deseja prosseguir?',
+        'queue_cleared_success' => 'Spooler de impressão reiniciado e fila pendente limpa com sucesso.',
+        'queue_cleared_failed' => 'Falha ao limpar a fila de impressão. Verifique permissões de Administrador/sudo.',
+    ],
+
+    'network' => [
+        'interfaces_section' => 'Interfaces de Rede Ativas',
+        'connectivity_section' => 'Verificação de Conectividade e Resolução DNS',
+        'ports_section' => 'Portas Ativas em Escuta (TCP/UDP)',
+        'interface_headers' => [
+            'interface' => 'Interface',
+            'ipv4' => 'Endereço IPv4',
+            'ipv6' => 'Endereço IPv6',
+            'mac' => 'Endereço MAC',
+            'status' => 'Estado',
+        ],
+        'connectivity_headers' => [
+            'target' => 'Destino',
+            'check' => 'Tipo de Teste',
+            'status' => 'Resultado',
+            'latency' => 'Latência',
+        ],
+        'port_headers' => [
+            'protocol' => 'Protocolo',
+            'local_address' => 'Endereço Local',
+            'port' => 'Porta',
+            'pid' => 'PID',
+            'process' => 'Processo',
+        ],
+        'no_interfaces' => 'Nenhuma interface de rede ativa detectada.',
+        'no_ports' => 'Nenhuma porta em escuta detectada.',
+        'confirm_flush' => 'Isto limpará o cache DNS e renovará a configuração de rede (pode interromper conexões brevemente). Prosseguir?',
+        'flush_success' => 'Cache DNS limpo e configuração de rede renovada com sucesso.',
+        'flush_failed' => 'Falha ao limpar o DNS ou renovar a configuração de rede.',
+    ],
+
+    'maintenance' => [
+        'clean_section' => 'Limpeza de Arquivos Temporários',
+        'confirm_clean' => 'Tem certeza de que deseja limpar os diretórios temporários (%TEMP%, /tmp, caches)? Arquivos em uso serão ignorados com segurança.',
+        'clean_success' => 'Diretórios temporários limpos com sucesso.',
+        'clean_failed' => 'Falha ao concluir a limpeza de arquivos temporários.',
+        'details_labels' => [
+            'deleted_files' => 'Arquivos Removidos',
+            'skipped_locked_files' => 'Ignorados (Em Uso / Bloqueados)',
+            'freed_space' => 'Espaço Liberado',
+            'paths' => 'Diretórios Alvo',
+            'driver' => 'Driver do SO',
+            'service' => 'Serviço',
+            'pid' => 'ID do Processo (PID)',
+            'commands_executed' => 'Comandos Executados',
+        ],
+    ],
+
+    'report' => [
+        'section' => 'Exportação de Relatório de Diagnóstico',
+        'format_prompt' => 'Selecione o formato de exportação do relatório de diagnóstico:',
+        'formats' => [
+            'txt' => 'Texto Puro (.txt)',
+            'json' => 'Documento JSON (.json)',
+        ],
+        'exported_success' => 'Relatório de diagnóstico exportado com sucesso em: :path',
+        'exported_failed' => 'Falha ao gravar o relatório de diagnóstico em disco: :path',
+    ],
+];

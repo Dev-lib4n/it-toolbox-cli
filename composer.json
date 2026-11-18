@@ -1,0 +1,53 @@
+{
+    "name": "ianlibanio/it-toolbox-cli",
+    "description": "Cross-Platform IT Support & System Diagnostics CLI/TUI built with Laravel Zero",
+    "keywords": [
+        "cli",
+        "tui",
+        "it-support",
+        "diagnostics",
+        "laravel-zero",
+        "sysadmin",
+        "windows",
+        "linux"
+    ],
+    "homepage": "https://github.com/ianlibanio/it-toolbox-cli",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.3",
+        "illuminate/filesystem": "^11.0",
+        "illuminate/translation": "^11.0",
+        "laravel-zero/framework": "^11.0",
+        "laravel/prompts": "^0.1.25 || ^0.2.0 || ^0.3.0",
+        "symfony/process": "^7.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.18",
+        "mockery/mockery": "^1.6",
+        "pestphp/pest": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "optimize-autoloader": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "bin": [
+        "it-toolbox"
+    ]
+}
