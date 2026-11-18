@@ -1,7 +1,7 @@
 {
     "chmod": "0755",
     "main": "it-toolbox",
-    "output-path": "builds/it-toolbox",
+    "output": "it-toolbox.phar",
     "directories": [
         "app",
         "bootstrap",

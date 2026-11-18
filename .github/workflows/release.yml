@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Build version (e.g. 1.0.0)'
+        description: 'Build version (e.g. v1.0.0)'
         required: false
-        default: '1.0.0'
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -28,7 +28,7 @@ jobs:
         with:
           php-version: '8.3'
           extensions: mbstring, json, posix, phar, fileinfo, curl, openssl, ctype, tokenizer, dom, xml
-          ini-values: phar.readonly=Off
+          ini-values: phar.readonly=0
           coverage: none
           tools: composer:v2
 
@@ -36,11 +36,9 @@ jobs:
         run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
 
       - name: Compile Portable PHAR (builds/it-toolbox)
-        env:
-          BUILD_VERSION: ${{ github.event.inputs.version || github.ref_name || '1.0.0' }}
         run: |
           mkdir -p builds
-          php -d phar.readonly=0 it-toolbox app:build it-toolbox --build-version="${BUILD_VERSION#v}" --no-interaction
+          php -d phar.readonly=0 it-toolbox app:build it-toolbox --build-version=${{ github.ref_name }} --no-interaction
           chmod +x builds/it-toolbox
           ls -lh builds/it-toolbox
 

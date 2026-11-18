@@ -1,6 +1,7 @@
 /vendor/
 /builds/
 /.spc-cache/
+it-toolbox.phar
 .phpunit.result.cache
 .phpunit.cache/
 composer.lock
