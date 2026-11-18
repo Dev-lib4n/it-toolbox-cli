@@ -273,6 +273,8 @@ return [
         'confirm_download' => 'Download and install v:version (:asset) now?',
         'updated_success' => 'IT Toolbox CLI has been updated successfully!',
         'restart_notice' => 'Please restart it-toolbox to use the new version (v:version).',
+        'confirm_restart' => 'Restart IT Toolbox CLI now to launch v:version?',
+        'restarting_new_version' => 'Restarting in the new version (v:version)...',
         'check_failed' => 'Unable to check for updates from GitHub Releases. Verify your internet connection.',
         'asset_not_found' => 'Release artifact could not be found in the latest GitHub Release.',
         'download_failed' => 'Failed to download the release binary from GitHub.',

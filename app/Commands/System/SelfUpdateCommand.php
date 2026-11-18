@@ -27,6 +27,7 @@ class SelfUpdateCommand extends Command
      */
     protected $signature = 'self:update
                             {--check : Only check if a new version is available without downloading}
+                            {--no-restart : Do not automatically relaunch the updated executable}
                             {--lang= : Interface language (en or pt_BR)}';
 
     /**
@@ -41,7 +42,7 @@ class SelfUpdateCommand extends Command
      */
     public function handle(SelfUpdateService $updateService): int
     {
-        $this->resolveLocale();
+        $locale = $this->resolveLocale();
 
         info((string) __('messages.update.section'));
 
@@ -99,6 +100,14 @@ class SelfUpdateCommand extends Command
         $restartNoticeMsg = (string) __('messages.update.restart_notice', [
             'version' => $check['latest_version'],
         ]);
+        $confirmRestartLabel = (string) __('messages.update.confirm_restart', [
+            'version' => $check['latest_version'],
+        ]);
+        $restartingNewVersionMsg = (string) __('messages.update.restarting_new_version', [
+            'version' => $check['latest_version'],
+        ]);
+        $yesLabel = (string) __('messages.common.yes');
+        $noLabel = (string) __('messages.common.no');
         $downloadFailedMsg = (string) __('messages.update.download_failed');
         $versionSummary = sprintf(
             '  v%s -> v%s (%s)',
@@ -128,6 +137,27 @@ class SelfUpdateCommand extends Command
                     $this->output->writeln('  ' . (string) $updatedPath);
                 }
             }
+
+            $runningBinary = $this->resolveRunningBinaryPath();
+            $noRestart = (bool) $this->option('no-restart');
+
+            if ($runningBinary !== '' && ! $noRestart) {
+                $shouldRestart = true;
+                if ($this->input->isInteractive()) {
+                    $shouldRestart = confirm(
+                        label: $confirmRestartLabel,
+                        default: true,
+                        yes: $yesLabel,
+                        no: $noLabel,
+                    );
+                }
+
+                if ($shouldRestart) {
+                    info($restartingNewVersionMsg);
+                    $this->relaunchBinary($runningBinary, $locale);
+                }
+            }
+
             warning($restartNoticeMsg);
 
             if (Phar::running(false) !== '') {
@@ -140,5 +170,37 @@ class SelfUpdateCommand extends Command
         }
 
         return $this->renderActionResult($result);
+    }
+
+    /**
+     * Resolve the running PHAR / standalone binary path (empty when running from unpacked source).
+     */
+    protected function resolveRunningBinaryPath(): string
+    {
+        return Phar::running(false);
+    }
+
+    /**
+     * Relaunch the newly replaced executable with the active locale and terminate this old process.
+     */
+    protected function relaunchBinary(string $binaryPath, string $locale): never
+    {
+        sleep(1);
+
+        $safeLocale = in_array($locale, $this->supportedLocales, true) ? $locale : 'en';
+        $langFlag = '--lang=' . $safeLocale;
+
+        if (PHP_OS_FAMILY !== 'Windows' && function_exists('pcntl_exec')) {
+            pcntl_exec($binaryPath, [$langFlag]);
+        }
+
+        $command = PHP_OS_FAMILY === 'Windows'
+            ? escapeshellarg($binaryPath) . ' ' . $langFlag
+            : escapeshellarg($binaryPath) . ' --lang=' . escapeshellarg($safeLocale);
+
+        $exitCode = 0;
+        passthru($command, $exitCode);
+
+        exit((int) $exitCode);
     }
 }
