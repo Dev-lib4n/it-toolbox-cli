@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace App\Commands;
 
 use App\Commands\Concerns\InteractsWithLocale;
+use App\Commands\Concerns\InteractsWithTerminal;
 use LaravelZero\Framework\Commands\Command;
 
 use function Laravel\Prompts\info;
-use function Laravel\Prompts\note;
-use function Laravel\Prompts\select;
 
 class ToolboxMenuCommand extends Command
 {
     use InteractsWithLocale;
+    use InteractsWithTerminal;
 
     /**
      * The signature of the command.
@@ -36,34 +36,46 @@ class ToolboxMenuCommand extends Command
      */
     public function handle(): int
     {
-        $locale = $this->resolveLocale(promptIfMissing: true);
-
-        $this->renderHeader();
+        $locale = $this->resolveInitialLocale();
 
         while (true) {
-            $category = (string) select(
-                label: (string) __('messages.menu.main_prompt'),
+            $this->clearScreen();
+            $this->renderHeader($locale);
+
+            $choice = $this->promptNumericMenu(
+                promptLabel: (string) __('messages.menu.main_prompt'),
                 options: [
-                    'system' => (string) __('messages.menu.categories.system'),
-                    'printers' => (string) __('messages.menu.categories.printers'),
-                    'network' => (string) __('messages.menu.categories.network'),
-                    'maintenance' => (string) __('messages.menu.categories.maintenance'),
-                    'reports' => (string) __('messages.menu.categories.reports'),
-                    'language' => (string) __('messages.menu.categories.language'),
-                    'exit' => (string) __('messages.menu.exit'),
+                    '1' => (string) __('messages.menu.categories.system'),
+                    '2' => (string) __('messages.menu.categories.printers'),
+                    '3' => (string) __('messages.menu.categories.network'),
+                    '4' => (string) __('messages.menu.categories.maintenance'),
+                    '5' => (string) __('messages.menu.categories.reports'),
+                    '6' => (string) __('messages.menu.categories.language'),
+                    '0' => (string) __('messages.menu.exit'),
                 ],
+                defaultKey: '1',
             );
 
-            if ($category === 'exit') {
+            if ($choice === '0') {
+                $this->clearScreen();
                 info((string) __('messages.app.goodbye'));
 
                 return self::SUCCESS;
             }
 
-            if ($category === 'language') {
-                $locale = $this->promptForLanguage();
-                $this->renderHeader();
+            if ($choice === '5') {
+                $this->executeSubcommand('report:export', $locale);
+            } elseif ($choice === '6') {
+                $locale = $this->promptNumericLanguageSwitch($locale);
             } else {
+                $category = match ($choice) {
+                    '1' => 'system',
+                    '2' => 'printers',
+                    '3' => 'network',
+                    '4' => 'maintenance',
+                    default => 'system',
+                };
+
                 $this->handleCategorySubmenu($category, $locale);
             }
 
@@ -74,58 +86,121 @@ class ToolboxMenuCommand extends Command
     }
 
     /**
-     * Render the TUI header banner.
+     * Resolve the initial locale from --lang or display the numeric language selector.
      */
-    protected function renderHeader(): void
+    protected function resolveInitialLocale(): string
     {
-        info(sprintf('%s — %s', (string) __('messages.app.name'), (string) __('messages.app.tagline')));
-        note((string) __('messages.app.detected_os', ['os' => PHP_OS_FAMILY]));
+        $optionLocale = $this->option('lang');
+
+        if (is_string($optionLocale) && $optionLocale !== '') {
+            return $this->resolveLocale(promptIfMissing: false);
+        }
+
+        $this->clearScreen();
+        $this->renderHeader('en');
+
+        return $this->promptNumericLanguageSwitch('en', allowBack: false);
     }
 
     /**
-     * Display the submenu for the chosen category and dispatch the selected command.
+     * Display a numbered language switcher ([1] English, [2] Português, and optionally [0] Back).
+     */
+    protected function promptNumericLanguageSwitch(string $currentLocale, bool $allowBack = true): string
+    {
+        if ($allowBack) {
+            $this->clearScreen();
+            $this->renderHeader($currentLocale);
+        }
+
+        $options = [
+            '1' => (string) __('messages.language.en'),
+            '2' => (string) __('messages.language.pt_BR'),
+        ];
+
+        if ($allowBack) {
+            $options['0'] = (string) __('messages.menu.back');
+        }
+
+        $defaultKey = $currentLocale === 'pt_BR' ? '2' : '1';
+
+        $choice = $this->promptNumericMenu(
+            promptLabel: (string) __('messages.language.select_prompt'),
+            options: $options,
+            defaultKey: $defaultKey,
+        );
+
+        if ($choice === '0') {
+            return $currentLocale;
+        }
+
+        $selectedLocale = $choice === '2' ? 'pt_BR' : 'en';
+        $this->applyLocale($selectedLocale);
+
+        return $selectedLocale;
+    }
+
+    /**
+     * Display the numbered submenu for the chosen category in a loop until [0] Back is selected.
      */
     protected function handleCategorySubmenu(string $category, string $locale): void
     {
-        $options = match ($category) {
-            'system' => [
-                'system:info' => (string) __('messages.menu.actions.system_info'),
-                'system:top' => (string) __('messages.menu.actions.system_top'),
-                'back' => (string) __('messages.menu.back'),
-            ],
-            'printers' => [
-                'printer:list' => (string) __('messages.menu.actions.printer_list'),
-                'printer:clear' => (string) __('messages.menu.actions.printer_clear'),
-                'back' => (string) __('messages.menu.back'),
-            ],
-            'network' => [
-                'network:check' => (string) __('messages.menu.actions.network_check'),
-                'network:flush' => (string) __('messages.menu.actions.network_flush'),
-                'network:ports' => (string) __('messages.menu.actions.network_ports'),
-                'back' => (string) __('messages.menu.back'),
-            ],
-            'maintenance' => [
-                'clean:temp' => (string) __('messages.menu.actions.clean_temp'),
-                'back' => (string) __('messages.menu.back'),
-            ],
-            'reports' => [
-                'report:export' => (string) __('messages.menu.actions.report_export'),
-                'back' => (string) __('messages.menu.back'),
-            ],
-            default => [
-                'back' => (string) __('messages.menu.back'),
-            ],
-        };
+        while (true) {
+            $this->clearScreen();
+            $this->renderHeader($locale);
 
-        $action = (string) select(
-            label: (string) __('messages.menu.sub_prompt'),
-            options: $options,
-        );
+            /** @var array<string, array{label: string, command: string}> $actionsMap */
+            $actionsMap = match ($category) {
+                'system' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.system_info'), 'command' => 'system:info'],
+                    '2' => ['label' => (string) __('messages.menu.actions.system_top'), 'command' => 'system:top'],
+                ],
+                'printers' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.printer_list'), 'command' => 'printer:list'],
+                    '2' => ['label' => (string) __('messages.menu.actions.printer_clear'), 'command' => 'printer:clear'],
+                ],
+                'network' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.network_check'), 'command' => 'network:check'],
+                    '2' => ['label' => (string) __('messages.menu.actions.network_flush'), 'command' => 'network:flush'],
+                    '3' => ['label' => (string) __('messages.menu.actions.network_ports'), 'command' => 'network:ports'],
+                ],
+                'maintenance' => [
+                    '1' => ['label' => (string) __('messages.menu.actions.clean_temp'), 'command' => 'clean:temp'],
+                ],
+                default => [],
+            };
 
-        if ($action === 'back') {
-            return;
+            $menuOptions = [];
+            foreach ($actionsMap as $num => $item) {
+                $menuOptions[$num] = $item['label'];
+            }
+            $menuOptions['0'] = (string) __('messages.menu.back');
+
+            $choice = $this->promptNumericMenu(
+                promptLabel: (string) __('messages.menu.sub_prompt'),
+                options: $menuOptions,
+                defaultKey: '1',
+            );
+
+            if ($choice === '0' || ! isset($actionsMap[$choice])) {
+                return;
+            }
+
+            $this->executeSubcommand($actionsMap[$choice]['command'], $locale);
+
+            if ($this->option('once')) {
+                return;
+            }
         }
+    }
 
-        $this->call($action, ['--lang' => $locale]);
+    /**
+     * Clear the screen, render the header, execute a subcommand, and wait for user acknowledgment.
+     */
+    protected function executeSubcommand(string $command, string $locale): void
+    {
+        $this->clearScreen();
+        $this->renderHeader($locale);
+        $this->call($command, ['--lang' => $locale]);
+        $this->waitForKeyPress();
     }
 }
