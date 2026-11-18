@@ -826,3 +826,65 @@ it('hardens cleanTempFiles, cleanBrowserCaches, getHostsEntries, and auditEnviro
         @rmdir($baseTemp);
     }
 });
+
+it('never falsely excludes files when ancestor directories above the scan root contain run, sys, dev, or Windows segments', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            return new ProcessResult(0, '');
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $ancestorRoot = sys_get_temp_dir()
+        . DIRECTORY_SEPARATOR . 'it_toolbox_anc_' . uniqid()
+        . DIRECTORY_SEPARATOR . 'runneradmin'
+        . DIRECTORY_SEPARATOR . 'AppData'
+        . DIRECTORY_SEPARATOR . 'Windows'
+        . DIRECTORY_SEPARATOR . 'sys'
+        . DIRECTORY_SEPARATOR . 'dev';
+    $scanRoot = $ancestorRoot . DIRECTORY_SEPARATOR . 'TempScan';
+    $excludedChild = $scanRoot . DIRECTORY_SEPARATOR . 'System Volume Information';
+
+    mkdir($scanRoot, 0777, true);
+    mkdir($excludedChild, 0777, true);
+
+    $validPayload = $scanRoot . DIRECTORY_SEPARATOR . 'runner_artifact.bin';
+    $excludedPayload = $excludedChild . DIRECTORY_SEPARATOR . 'ignored_volume.bin';
+    file_put_contents($validPayload, str_repeat('V', 2048));
+    file_put_contents($excludedPayload, str_repeat('I', 8192));
+
+    try {
+        $found = $driver->findLargeFiles($scanRoot, 5);
+        expect($found)->toHaveCount(1)
+            ->and(basename($found[0]['path']))->toBe('runner_artifact.bin');
+
+        $cleaned = $driver->cleanTempFiles([$scanRoot]);
+        expect($cleaned->success)->toBeTrue()
+            ->and($cleaned->details['deleted_files'])->toBe(1)
+            ->and(file_exists($validPayload))->toBeFalse()
+            ->and(file_exists($excludedPayload))->toBeTrue();
+    } finally {
+        @unlink($validPayload);
+        @unlink($excludedPayload);
+        @rmdir($excludedChild);
+        @rmdir($scanRoot);
+        @rmdir(dirname($scanRoot));
+        @rmdir(dirname($scanRoot, 2));
+        @rmdir(dirname($scanRoot, 3));
+        @rmdir(dirname($scanRoot, 4));
+        @rmdir(dirname($scanRoot, 5));
+    }
+});

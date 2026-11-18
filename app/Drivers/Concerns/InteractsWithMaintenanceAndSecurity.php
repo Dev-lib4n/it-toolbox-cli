@@ -34,12 +34,12 @@ trait InteractsWithMaintenanceAndSecurity
     ];
 
     /**
-     * Ignored virtual/system directory names when scanning for large files.
+     * Ignored repository/vendor directory names when scanning for large files.
      *
      * @var array<int, string>
      */
     private const IGNORED_SCAN_DIRS = [
-        'proc', 'sys', 'dev', 'run', 'snap', 'winsxs', 'system volume information', '$recycle.bin', '.git', 'node_modules',
+        '.git', 'node_modules',
     ];
 
     /**
@@ -144,7 +144,7 @@ trait InteractsWithMaintenanceAndSecurity
 
             $filterIterator = new RecursiveCallbackFilterIterator(
                 $dirIterator,
-                function (SplFileInfo $current) use ($shouldDescendDir, $onUnreadableDir): bool {
+                function (SplFileInfo $current) use ($directory, $shouldDescendDir, $onUnreadableDir): bool {
                     try {
                         if ($current->isLink()) {
                             return false;
@@ -155,7 +155,7 @@ trait InteractsWithMaintenanceAndSecurity
                             return false;
                         }
 
-                        if ($this->shouldSkipScanPath($pathname)) {
+                        if ($this->isExcludedDirectory($pathname, $directory)) {
                             return false;
                         }
 
@@ -270,21 +270,42 @@ trait InteractsWithMaintenanceAndSecurity
     }
 
     /**
-     * Check whether a normalized filesystem path belongs to protected or virtual OS directories.
+     * Check whether a scanned path matches protected or virtual OS directories relative to the scan root.
+     * Never matches parent segments above $rootPath (e.g. C:\Users\runneradmin\AppData\Local\Temp).
      */
-    protected function shouldSkipScanPath(string $pathname): bool
+    protected function isExcludedDirectory(string $currentPath, string $rootPath): bool
     {
-        $normalized = strtolower(str_replace('\\', '/', $pathname));
+        $normalizedRoot = rtrim(str_replace('\\', '/', $rootPath), '/');
+        $normalizedCurrent = str_replace('\\', '/', $currentPath);
 
-        foreach (['/proc', '/sys', '/dev', '/run'] as $virtualRoot) {
-            if ($normalized === $virtualRoot || str_starts_with($normalized, $virtualRoot . '/')) {
+        if ($normalizedRoot !== '' && str_starts_with(strtolower($normalizedCurrent), strtolower($normalizedRoot) . '/')) {
+            $relative = ltrim(substr($normalizedCurrent, strlen($normalizedRoot)), '/');
+        } elseif ($normalizedRoot === '') {
+            $relative = ltrim($normalizedCurrent, '/');
+        } else {
+            $relative = basename($normalizedCurrent);
+        }
+
+        if ($relative === '') {
+            return false;
+        }
+
+        $relativeLower = strtolower($relative);
+        $segments = explode('/', $relativeLower);
+
+        $excludedSegments = [
+            'proc', 'sys', 'dev', 'run', 'snap', 'winsxs', 'system volume information', '$recycle.bin',
+        ];
+
+        foreach ($segments as $segment) {
+            if (in_array($segment, $excludedSegments, true)) {
                 return true;
             }
         }
 
-        return str_contains($normalized, 'windows/winsxs')
-            || str_contains($normalized, '$recycle.bin')
-            || str_contains($normalized, 'system volume information');
+        return str_contains($relativeLower, 'windows/winsxs')
+            || str_contains($relativeLower, '$recycle.bin')
+            || str_contains($relativeLower, 'system volume information');
     }
 
     /**
