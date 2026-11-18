@@ -57,6 +57,57 @@ trait InteractsWithTerminal
     }
 
     /**
+     * Restore the terminal to standard canonical/blocking mode before invoking interactive subcommands.
+     */
+    protected function restoreTerminal(): void
+    {
+        if (defined('STDIN') && is_resource(STDIN)) {
+            @stream_set_blocking(STDIN, true);
+        }
+
+        if (PHP_OS_FAMILY !== 'Windows' && $this->isInteractiveTty() && Process::isTtySupported()) {
+            $this->setUnixSttyMode(['sane']);
+        }
+    }
+
+    /**
+     * Drain any leftover buffered newline/keystroke bytes from STDIN before waiting for user confirmation.
+     */
+    protected function drainInputBuffer(): void
+    {
+        if (! defined('STDIN') || ! is_resource(STDIN) || ! $this->isInteractiveTty()) {
+            return;
+        }
+
+        @stream_set_blocking(STDIN, false);
+
+        try {
+            $iterations = 0;
+            while ($iterations < 32) {
+                $read = [STDIN];
+                $write = null;
+                $except = null;
+
+                $ready = @stream_select($read, $write, $except, 0, 0);
+                if ($ready === false || $ready === 0) {
+                    break;
+                }
+
+                $chunk = @fread(STDIN, 64);
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+
+                $iterations++;
+            }
+        } catch (Throwable) {
+            // Ignore stream_select issues on non-selectable handles
+        } finally {
+            @stream_set_blocking(STDIN, true);
+        }
+    }
+
+    /**
      * Render the compact top banner showing tool name, detected OS, privilege level, and active locale.
      */
     protected function renderHeader(?string $locale = null): void
@@ -99,13 +150,16 @@ trait InteractsWithTerminal
 
         $validKeys = array_map('strval', array_keys($options));
         $optionsList = implode(', ', $validKeys);
+        $singleDigitOnly = max(array_map('strlen', $validKeys)) === 1;
 
-        if (PHP_OS_FAMILY !== 'Windows' && $this->isInteractiveTty() && Process::isTtySupported()) {
+        if ($singleDigitOnly && PHP_OS_FAMILY !== 'Windows' && $this->isInteractiveTty() && Process::isTtySupported()) {
             $singleKey = $this->readSingleKeyUnix($validKeys, $optionsList);
             if ($singleKey !== null) {
                 return $singleKey;
             }
         }
+
+        $this->restoreTerminal();
 
         $selected = text(
             label: (string) __('messages.menu.numeric_hint', ['options' => $optionsList]),
@@ -127,28 +181,33 @@ trait InteractsWithTerminal
             return;
         }
 
-        $prompt = (string) __('messages.menu.press_any_key');
-
         if (! defined('STDIN') || ! defined('STDOUT')) {
             return;
         }
 
+        $this->restoreTerminal();
+        $this->drainInputBuffer();
+
+        $prompt = (string) __('messages.menu.press_any_key');
         fwrite(STDOUT, PHP_EOL . '  ' . $prompt . ' ');
         fflush(STDOUT);
 
         if (PHP_OS_FAMILY !== 'Windows' && $this->isInteractiveTty() && Process::isTtySupported()) {
             if ($this->setUnixSttyMode(['-icanon', '-echo'])) {
                 try {
+                    @stream_set_blocking(STDIN, true);
                     @fread(STDIN, 1);
                 } finally {
-                    $this->setUnixSttyMode(['sane']);
+                    $this->restoreTerminal();
                 }
                 fwrite(STDOUT, PHP_EOL);
+                fflush(STDOUT);
 
                 return;
             }
         }
 
+        @stream_set_blocking(STDIN, true);
         @fgets(STDIN);
     }
 
@@ -159,6 +218,8 @@ trait InteractsWithTerminal
      */
     protected function readSingleKeyUnix(array $validKeys, string $optionsList): ?string
     {
+        $this->drainInputBuffer();
+
         if (! $this->setUnixSttyMode(['-icanon', '-echo'])) {
             return null;
         }
@@ -167,6 +228,8 @@ trait InteractsWithTerminal
         fflush(STDOUT);
 
         try {
+            @stream_set_blocking(STDIN, true);
+
             while (true) {
                 $char = @fread(STDIN, 1);
                 if ($char === false || $char === '') {
@@ -175,7 +238,7 @@ trait InteractsWithTerminal
 
                 // Handle Ctrl+C (\x03) gracefully
                 if ($char === "\x03") {
-                    $this->setUnixSttyMode(['sane']);
+                    $this->restoreTerminal();
                     fwrite(STDOUT, PHP_EOL);
                     exit(130);
                 }
@@ -188,7 +251,7 @@ trait InteractsWithTerminal
                 }
             }
         } finally {
-            $this->setUnixSttyMode(['sane']);
+            $this->restoreTerminal();
         }
     }
 
