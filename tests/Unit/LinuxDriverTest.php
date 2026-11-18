@@ -206,3 +206,93 @@ it('parses Linux nmcli Wi-Fi metrics, ip neigh LAN devices, and executes network
         ->and($neighbors[0]['status'])->toBe('REACHABLE')
         ->and($neighbors[1]['ip'])->toBe('192.168.1.25');
 });
+
+it('parses Linux critical services, /sys battery telemetry, systemd startup units, lsusb devices, and killProcessByName', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        /** @var array<string, string> */
+        public array $files = [
+            '/sys/class/power_supply/BAT0/status' => "Discharging\n",
+            '/sys/class/power_supply/BAT0/capacity' => "76\n",
+            '/sys/class/power_supply/BAT0/energy_full_design' => "60000000\n", // 60,000 mWh
+            '/sys/class/power_supply/BAT0/energy_full' => "51000000\n",        // 51,000 mWh (85% health, 15% wear)
+            '/sys/class/power_supply/BAT0/cycle_count' => "215\n",
+        ];
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            if ($command[0] === 'systemctl' && ($command[1] ?? '') === 'show') {
+                return new ProcessResult(0, implode("\n", [
+                    'Id=cups.service',
+                    'Description=CUPS Scheduler',
+                    'LoadState=loaded',
+                    'ActiveState=active',
+                    'UnitFileState=enabled',
+                    '',
+                    'Id=nginx.service',
+                    'Description=A high performance web server',
+                    'LoadState=loaded',
+                    'ActiveState=inactive',
+                    'UnitFileState=disabled',
+                ]));
+            }
+
+            return match ($command) {
+                ['systemctl', 'restart', 'cups'] => new ProcessResult(0, ''),
+                ['systemctl', 'list-unit-files', '--state=enabled', '--type=service', '--no-pager', '--no-legend'] => new ProcessResult(
+                    0,
+                    "cups.service enabled enabled\nssh.service enabled enabled\n"
+                ),
+                ['lsusb'] => new ProcessResult(
+                    0,
+                    "Bus 001 Device 002: ID 046d:c52b Logitech, Inc. Unifying Receiver\nBus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub\n"
+                ),
+                ['pkill', '-15', '-x', 'firefox'] => new ProcessResult(0, ''),
+                default => new ProcessResult(1, '', 'Failed', false),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return $this->files[$path] ?? null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new LinuxDriver($executor);
+
+    $services = $driver->getCriticalServices();
+    expect($services)->toHaveCount(2)
+        ->and($services[0]['name'])->toBe('cups')
+        ->and($services[0]['status'])->toBe('Running')
+        ->and($services[1]['name'])->toBe('nginx')
+        ->and($services[1]['status'])->toBe('Stopped');
+
+    $restart = $driver->restartService('cups');
+    expect($restart->success)->toBeTrue()
+        ->and($restart->message)->toBe('messages.system.service_restarted_success');
+
+    $battery = $driver->getBatteryHealth();
+    expect($battery->success)->toBeTrue()
+        ->and($battery->details['charge_percent'])->toBe('76%')
+        ->and($battery->details['battery_health'])->toBe('85.0% (Wear: 15.0%)')
+        ->and($battery->details['cycle_count'])->toBe('215');
+
+    $startup = $driver->getStartupPrograms();
+    expect($startup)->toHaveCount(2)
+        ->and($startup[0]['name'])->toBe('cups')
+        ->and($startup[1]['name'])->toBe('ssh');
+
+    $usb = $driver->getUsbDevices();
+    expect($usb)->toHaveCount(2)
+        ->and($usb[0]['name'])->toBe('Logitech, Inc. Unifying Receiver')
+        ->and($usb[0]['manufacturer'])->toBe('ID 046d:c52b');
+
+    $killByName = $driver->killProcessByName('firefox');
+    expect($killByName->success)->toBeTrue()
+        ->and($killByName->details['process_name'])->toBe('firefox');
+});

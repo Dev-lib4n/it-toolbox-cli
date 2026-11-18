@@ -323,4 +323,89 @@ trait InteractsWithNetworkSockets
 
         return true;
     }
+
+    /**
+     * Audit key environment variables and inspect every directory entry in the system PATH.
+     *
+     * @return array{
+     *     variables: array<string, string>,
+     *     path_entries: array<int, array{index: int, path: string, status: string, icon: string}>,
+     *     summary: array{valid: int, broken: int, duplicate: int}
+     * }
+     */
+    public function auditEnvironmentPath(?string $customPathString = null): array
+    {
+        $rawPath = $customPathString ?? (string) (getenv('PATH') ?: ($_SERVER['PATH'] ?? ''));
+        $separator = $this->getEnvPathSeparator();
+
+        $rawEntries = $rawPath !== '' ? explode($separator, $rawPath) : [];
+
+        $seen = [];
+        $entries = [];
+        $validCount = 0;
+        $brokenCount = 0;
+        $duplicateCount = 0;
+        $index = 1;
+
+        foreach ($rawEntries as $entry) {
+            $cleanPath = trim($entry, " \t\n\r\0\x0B\"'");
+            if ($cleanPath === '') {
+                continue;
+            }
+
+            $normalizedKey = $separator === ';'
+                ? strtolower(rtrim($cleanPath, '\\/'))
+                : rtrim($cleanPath, '/');
+
+            if (isset($seen[$normalizedKey])) {
+                $status = 'DUPLICATE';
+                $icon = '⚠️';
+                $duplicateCount++;
+            } elseif (is_dir($cleanPath)) {
+                $status = 'VALID';
+                $icon = '✅';
+                $validCount++;
+                $seen[$normalizedKey] = true;
+            } else {
+                $status = 'BROKEN';
+                $icon = '❌';
+                $brokenCount++;
+                $seen[$normalizedKey] = true;
+            }
+
+            $entries[] = [
+                'index' => $index++,
+                'path' => $cleanPath,
+                'status' => $status,
+                'icon' => $icon,
+            ];
+        }
+
+        $variables = [
+            'OS_FAMILY' => PHP_OS_FAMILY,
+            'USER' => (string) (getenv('USERNAME') ?: getenv('USER') ?: get_current_user() ?: '-'),
+            'HOME' => (string) (getenv('USERPROFILE') ?: getenv('HOME') ?: '-'),
+            'SHELL' => (string) (getenv('SHELL') ?: getenv('ComSpec') ?: '-'),
+            'TEMP' => sys_get_temp_dir(),
+            'PHP_VERSION' => PHP_VERSION,
+        ];
+
+        return [
+            'variables' => $variables,
+            'path_entries' => $entries,
+            'summary' => [
+                'valid' => $validCount,
+                'broken' => $brokenCount,
+                'duplicate' => $duplicateCount,
+            ],
+        ];
+    }
+
+    /**
+     * Return the OS-specific PATH entry separator (';' on Windows, ':' on Linux).
+     */
+    protected function getEnvPathSeparator(): string
+    {
+        return PATH_SEPARATOR;
+    }
 }

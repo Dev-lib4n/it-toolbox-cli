@@ -334,6 +334,70 @@ class LinuxDriver implements SystemDriverInterface
     /**
      * {@inheritDoc}
      */
+    public function killProcessByName(string $processName): ActionResult
+    {
+        $cleanName = preg_replace('/[^A-Za-z0-9_.-]/', '', trim($processName)) ?? '';
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.process_killed_failed',
+                details: ['process_name' => $processName, 'driver' => 'Linux'],
+            );
+        }
+
+        $result = $this->processRunner->run(['pkill', '-15', '-x', $cleanName]);
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.process_killed_success',
+                details: [
+                    'process_name' => $cleanName,
+                    'signal' => 'SIGTERM',
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        $err = $result->errorOutput !== '' ? $result->errorOutput : $result->output;
+        if ($this->isPermissionDeniedError($err)) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.common.permission_denied',
+                details: [
+                    'process_name' => $cleanName,
+                    'error' => $err,
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        $forceResult = $this->processRunner->run(['pkill', '-9', '-x', $cleanName]);
+        if ($forceResult->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.process_killed_success',
+                details: [
+                    'process_name' => $cleanName,
+                    'signal' => 'SIGKILL',
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        return new ActionResult(
+            success: false,
+            message: 'messages.system.process_killed_failed',
+            details: [
+                'process_name' => $cleanName,
+                'error' => $forceResult->errorOutput ?: ($err ?: 'Process not found'),
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function getCriticalLogs(int $limit = 15): ActionResult
     {
         $safeLimit = max(1, $limit);
@@ -372,6 +436,247 @@ class LinuxDriver implements SystemDriverInterface
                 'driver' => 'Linux',
             ],
         );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getCriticalServices(): array
+    {
+        $candidates = [
+            'cups' => 'CUPS Print Spooler',
+            'ssh' => 'OpenSSH Server (ssh)',
+            'sshd' => 'OpenSSH Daemon (sshd)',
+            'docker' => 'Docker Engine',
+            'nginx' => 'Nginx Web Server',
+            'NetworkManager' => 'NetworkManager',
+            'cron' => 'Cron Daemon',
+        ];
+
+        $result = $this->processRunner->run([
+            'systemctl',
+            'show',
+            '--property=Id,Description,ActiveState,UnitFileState,LoadState',
+            '--',
+            'cups.service',
+            'ssh.service',
+            'sshd.service',
+            'docker.service',
+            'nginx.service',
+            'NetworkManager.service',
+            'cron.service',
+        ]);
+
+        if (! $result->successful || $result->output === '') {
+            return [];
+        }
+
+        $services = [];
+        $blocks = preg_split('/\r?\n\r?\n/', trim($result->output)) ?: [];
+
+        foreach ($blocks as $block) {
+            $props = [];
+            foreach (preg_split('/\r\n|\r|\n/', trim($block)) ?: [] as $line) {
+                if (str_contains($line, '=')) {
+                    [$k, $v] = explode('=', $line, 2);
+                    $props[trim($k)] = trim($v);
+                }
+            }
+
+            $loadState = strtolower($props['LoadState'] ?? '');
+            if ($loadState === 'not-found' || empty($props['Id'])) {
+                continue;
+            }
+
+            $unitName = (string) preg_replace('/\.service$/', '', $props['Id']);
+            $activeState = strtolower($props['ActiveState'] ?? 'inactive');
+            $status = $activeState === 'active' ? 'Running' : 'Stopped';
+
+            $services[] = [
+                'name' => $unitName,
+                'display_name' => $props['Description'] ?? ($candidates[$unitName] ?? $unitName),
+                'status' => $status,
+                'start_type' => $props['UnitFileState'] ?? 'enabled',
+            ];
+        }
+
+        return $services;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function restartService(string $serviceName): ActionResult
+    {
+        if (! $this->isRoot()) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.common.permission_denied',
+                details: ['service' => $serviceName, 'driver' => 'Linux'],
+            );
+        }
+
+        $cleanName = preg_replace('/[^A-Za-z0-9_.-]/', '', trim($serviceName)) ?? '';
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.service_restarted_failed',
+                details: ['service' => $serviceName, 'driver' => 'Linux'],
+            );
+        }
+
+        $result = $this->processRunner->run(['systemctl', 'restart', $cleanName]);
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.service_restarted_success',
+                details: [
+                    'service' => $cleanName,
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        $fallback = $this->processRunner->run(['service', $cleanName, 'restart']);
+        if ($fallback->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.service_restarted_success',
+                details: [
+                    'service' => $cleanName,
+                    'driver' => 'Linux',
+                ],
+            );
+        }
+
+        return new ActionResult(
+            success: false,
+            message: 'messages.system.service_restarted_failed',
+            details: [
+                'service' => $cleanName,
+                'error' => $result->errorOutput ?: ($fallback->errorOutput ?: 'Failed to restart service'),
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getBatteryHealth(): ActionResult
+    {
+        $batBase = null;
+        foreach (['/sys/class/power_supply/BAT0', '/sys/class/power_supply/BAT1'] as $candidate) {
+            if ($this->readFile($candidate . '/status') !== null) {
+                $batBase = $candidate;
+                break;
+            }
+        }
+
+        if ($batBase === null) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.no_battery',
+                details: ['driver' => 'Linux'],
+            );
+        }
+
+        $status = trim((string) ($this->readFile($batBase . '/status') ?? 'Unknown'));
+        $capacity = (int) trim((string) ($this->readFile($batBase . '/capacity') ?? '0'));
+        $designRaw = $this->readFile($batBase . '/energy_full_design') ?? $this->readFile($batBase . '/charge_full_design');
+        $fullRaw = $this->readFile($batBase . '/energy_full') ?? $this->readFile($batBase . '/charge_full');
+        $cyclesRaw = $this->readFile($batBase . '/cycle_count');
+
+        // /sys/class/power_supply reports energy in microWatt-hours (uWh) -> divide by 1000 for mWh
+        $designMwh = ($designRaw !== null && is_numeric(trim($designRaw))) ? ((float) trim($designRaw)) / 1000.0 : 0.0;
+        $fullMwh = ($fullRaw !== null && is_numeric(trim($fullRaw))) ? ((float) trim($fullRaw)) / 1000.0 : 0.0;
+        $cycles = ($cyclesRaw !== null && is_numeric(trim($cyclesRaw))) ? (int) trim($cyclesRaw) : 0;
+
+        $healthPercent = ($designMwh > 0.0 && $fullMwh > 0.0)
+            ? min(100.0, round(($fullMwh / $designMwh) * 100.0, 1))
+            : 100.0;
+        $wearPercent = max(0.0, round(100.0 - $healthPercent, 1));
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.system.battery_fetched_success',
+            details: [
+                'battery_status' => $status,
+                'charge_percent' => sprintf('%d%%', $capacity),
+                'design_capacity' => $designMwh > 0.0 ? sprintf('%.0f mWh', $designMwh) : 'N/A',
+                'full_charge_capacity' => $fullMwh > 0.0 ? sprintf('%.0f mWh', $fullMwh) : 'N/A',
+                'battery_health' => sprintf('%.1f%% (Wear: %.1f%%)', $healthPercent, $wearPercent),
+                'cycle_count' => $cycles > 0 ? (string) $cycles : 'N/A',
+                'driver' => 'Linux',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getStartupPrograms(): array
+    {
+        $result = $this->processRunner->run([
+            'systemctl',
+            'list-unit-files',
+            '--state=enabled',
+            '--type=service',
+            '--no-pager',
+            '--no-legend',
+        ]);
+
+        $entries = [];
+        if ($result->successful && $result->output !== '') {
+            $lines = preg_split('/\r\n|\r|\n/', trim($result->output)) ?: [];
+            foreach (array_slice($lines, 0, 30) as $line) {
+                $parts = preg_split('/\s+/', trim($line));
+                if (is_array($parts) && count($parts) >= 2) {
+                    $unit = $parts[0];
+                    $state = $parts[1];
+                    $entries[] = [
+                        'name' => (string) preg_replace('/\.service$/', '', $unit),
+                        'command' => $unit,
+                        'location' => 'systemd (' . $state . ')',
+                        'user' => 'root',
+                    ];
+                }
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getUsbDevices(): array
+    {
+        $result = $this->processRunner->run(['lsusb']);
+        if (! $result->successful || $result->output === '') {
+            return [];
+        }
+
+        $devices = [];
+        $lines = preg_split('/\r\n|\r|\n/', trim($result->output)) ?: [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (preg_match('/^Bus\s+(\d+)\s+Device\s+(\d+):\s+ID\s+([0-9a-fA-F]{4}:[0-9a-fA-F]{4})\s*(.*)$/', $line, $m) === 1) {
+                $busDev = sprintf('Bus %s Dev %s', $m[1], $m[2]);
+                $vendorProd = $m[3];
+                $desc = trim($m[4]) !== '' ? trim($m[4]) : 'USB Device';
+
+                $devices[] = [
+                    'name' => $desc,
+                    'manufacturer' => 'ID ' . $vendorProd,
+                    'status' => 'OK',
+                    'device_id' => $busDev,
+                ];
+            }
+        }
+
+        return $devices;
     }
 
     /**
@@ -1777,5 +2082,13 @@ class LinuxDriver implements SystemDriverInterface
         }
 
         return rtrim(mb_substr($clean, 0, $maxLength - 3)) . '...';
+    }
+
+    /**
+     * Linux always uses ':' as the PATH directory separator.
+     */
+    protected function getEnvPathSeparator(): string
+    {
+        return ':';
     }
 }

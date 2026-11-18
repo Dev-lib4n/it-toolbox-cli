@@ -46,12 +46,68 @@ interface SystemDriverInterface
     public function killProcess(int $pid): ActionResult;
 
     /**
+     * Terminate running process(es) by process name.
+     *
+     * @param  string  $processName
+     * @return ActionResult
+     */
+    public function killProcessByName(string $processName): ActionResult;
+
+    /**
      * Retrieve recent critical and error events from the OS event log / journal (last 24 hours).
      *
      * @param  int  $limit
      * @return ActionResult
      */
     public function getCriticalLogs(int $limit = 15): ActionResult;
+
+    /**
+     * Retrieve status of critical IT support system services.
+     *
+     * @return array<int, array{name: string, display_name: string, status: string, start_type: string}>
+     */
+    public function getCriticalServices(): array;
+
+    /**
+     * Restart a system service by its service identifier.
+     *
+     * @param  string  $serviceName
+     * @return ActionResult
+     */
+    public function restartService(string $serviceName): ActionResult;
+
+    /**
+     * Retrieve battery health, charge level, design vs full capacity, wear percentage, and cycles.
+     *
+     * @return ActionResult
+     */
+    public function getBatteryHealth(): ActionResult;
+
+    /**
+     * Retrieve programs and services configured to run at system startup / login.
+     *
+     * @return array<int, array{name: string, command: string, location: string, user: string}>
+     */
+    public function getStartupPrograms(): array;
+
+    /**
+     * Retrieve connected USB and peripheral devices.
+     *
+     * @return array<int, array{name: string, manufacturer: string, status: string, device_id: string}>
+     */
+    public function getUsbDevices(): array;
+
+    /**
+     * Audit key environment variables and inspect every directory entry in the system PATH.
+     *
+     * @param  string|null  $customPathString  Optional custom PATH string for testing.
+     * @return array{
+     *     variables: array<string, string>,
+     *     path_entries: array<int, array{index: int, path: string, status: string, icon: string}>,
+     *     summary: array{valid: int, broken: int, duplicate: int}
+     * }
+     */
+    public function auditEnvironmentPath(?string $customPathString = null): array;
 
     /**
      * List installed printers, their current status, and pending print jobs.

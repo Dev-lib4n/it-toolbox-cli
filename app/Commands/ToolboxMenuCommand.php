@@ -160,6 +160,12 @@ class ToolboxMenuCommand extends Command
                     '1' => ['label' => (string) __('messages.menu.actions.system_info'), 'command' => 'system:info'],
                     '2' => ['label' => (string) __('messages.menu.actions.system_top'), 'command' => 'system:top'],
                     '3' => ['label' => (string) __('messages.menu.actions.system_logs'), 'command' => 'system:logs'],
+                    '4' => ['label' => (string) __('messages.menu.actions.system_services'), 'command' => 'system:services'],
+                    '5' => ['label' => (string) __('messages.menu.actions.system_battery'), 'command' => 'system:battery'],
+                    '6' => ['label' => (string) __('messages.menu.actions.system_startup'), 'command' => 'system:startup'],
+                    '7' => ['label' => (string) __('messages.menu.actions.system_usb'), 'command' => 'system:usb'],
+                    '8' => ['label' => (string) __('messages.menu.actions.system_env'), 'command' => 'system:env'],
+                    '9' => ['label' => (string) __('messages.menu.actions.system_kill'), 'command' => 'system:kill'],
                 ],
                 'printers' => [
                     '1' => ['label' => (string) __('messages.menu.actions.printer_list'), 'command' => 'printer:list'],
