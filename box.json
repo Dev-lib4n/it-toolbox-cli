@@ -13,7 +13,7 @@
         "composer.json",
         "LICENSE"
     ],
-    "exclude-composer-artifacts": false,
+    "exclude-composer-files": false,
     "compression": "GZ",
     "compactors": [
         "KevinGH\\Box\\Compactor\\Php",

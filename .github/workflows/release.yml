@@ -38,7 +38,7 @@ jobs:
       - name: Compile Portable PHAR (builds/it-toolbox)
         run: |
           mkdir -p builds
-          php -d phar.readonly=0 it-toolbox app:build it-toolbox --build-version=${{ github.ref_name }} --no-interaction
+          php it-toolbox app:build it-toolbox --build-version=${{ github.ref_name }} --no-interaction -vvv
           chmod +x builds/it-toolbox
           ls -lh builds/it-toolbox
 
