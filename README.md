@@ -75,6 +75,27 @@ flowchart TD
 
 ### Installation
 
+Choose the installation method that best fits your scenario:
+
+#### Option A: Standalone Binary (Recommended for End Users — No Composer Required)
+
+You can download the pre-compiled, portable `it-toolbox` executable directly from the [GitHub Releases](https://github.com/Dev-lib4n/it-toolbox-cli/releases) page without cloning the repository or installing Composer:
+
+```bash
+# 1. Download the latest 'it-toolbox' binary from GitHub Releases
+# 2. Run directly with PHP 8.3+
+php it-toolbox
+
+# (Optional on Linux) Make it executable and move to your PATH:
+chmod +x it-toolbox
+sudo mv it-toolbox /usr/local/bin/it-toolbox
+it-toolbox
+```
+
+#### Option B: From Source (Development & Contributors)
+
+If you want to contribute, customize the code, or run the automated test suite:
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/Dev-lib4n/it-toolbox-cli.git
@@ -114,7 +135,7 @@ Every module can also be executed directly in headless/CLI scripts or terminal s
 | `php it-toolbox network:flush` | Network | Flush DNS resolver cache and renew DHCP lease | `--force`, `--lang=en\|pt_BR` |
 | `php it-toolbox network:ports` | Network | List active listening TCP/UDP ports and owning processes | `--lang=en\|pt_BR` |
 | `php it-toolbox clean:temp` | Maintenance | Safely purge temporary files and report freed space | `--force`, `--lang=en\|pt_BR` |
-| `php it-toolbox report:export` | Reports | Export full system diagnostic report to `.txt` or `.json` | `--format=txt\|json`, `--output=PATH`, `--lang=en\|pt_BR` |
+| `php it-toolbox report:export` | Reports | Export full system diagnostic report to `.md` and/or `.json` | `--format=md\|json\|both`, `--output=DIR`, `--lang=en\|pt_BR` |
 
 ---
 

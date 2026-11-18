@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Drivers;
 
 use App\Contracts\ProcessExecutorInterface;
-use App\Contracts\ProcessRunnerInterface;
 use App\Contracts\SystemDriverInterface;
 use App\DTOs\ActionResult;
 use App\Services\SymfonyProcessExecutor;
@@ -55,13 +54,13 @@ class LinuxDriver implements SystemDriverInterface
     ];
 
     /**
-     * @param  ProcessExecutorInterface|ProcessRunnerInterface  $processRunner
+     * @param  ProcessExecutorInterface  $processRunner
      * @param  Closure|null  $fileReader  Optional custom file reader `fn(string $path): ?string` for testing.
      * @param  Closure|null  $uidResolver  Optional custom UID resolver `fn(): int` for testing.
      * @param  array<int, string>|null  $tempDirectories  Optional custom temp directories for testing.
      */
     public function __construct(
-        private readonly ProcessExecutorInterface|ProcessRunnerInterface $processRunner = new SymfonyProcessExecutor(),
+        private readonly ProcessExecutorInterface $processRunner = new SymfonyProcessExecutor(),
         private readonly ?Closure $fileReader = null,
         private readonly ?Closure $uidResolver = null,
         private readonly ?array $tempDirectories = null,

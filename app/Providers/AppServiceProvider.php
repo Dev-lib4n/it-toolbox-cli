@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\ProcessExecutorInterface;
-use App\Contracts\ProcessRunnerInterface;
 use App\Contracts\SystemDriverInterface;
 use App\Factories\SystemDriverFactory;
 use App\Services\SymfonyProcessExecutor;
-use App\Services\SymfonyProcessRunner;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Translation\FileLoader;
@@ -71,10 +69,6 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(ProcessExecutorInterface::class, function (): ProcessExecutorInterface {
             return new SymfonyProcessExecutor();
-        });
-
-        $this->app->singleton(ProcessRunnerInterface::class, function (): ProcessRunnerInterface {
-            return new SymfonyProcessRunner();
         });
 
         $this->app->singleton(SystemDriverInterface::class, function (): SystemDriverInterface {
