@@ -295,3 +295,106 @@ it('parses Windows Wi-Fi metrics, ARP LAN devices, and executes network stack re
         ->and($lanDevices[0]['mac'])->toBe('00:1A:2B:3C:4D:5E')
         ->and($lanDevices[1]['ip'])->toBe('192.168.1.50');
 });
+
+it('parses Windows critical services, battery health, startup items, USB devices, PATH audit, and killProcessByName', function (): void {
+    $executor = new class implements ProcessExecutorInterface
+    {
+        public int $callIndex = 0;
+
+        public function run(array $command, int $timeout = 30): ProcessResult
+        {
+            $this->callIndex++;
+
+            return match ($this->callIndex) {
+                1 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'Name' => 'Spooler',
+                        'DisplayName' => 'Print Spooler',
+                        'Status' => 'Running',
+                        'StartType' => 'Automatic',
+                    ],
+                ])),
+                2 => new ProcessResult(0, ''), // Restart-Service Spooler
+                3 => new ProcessResult(0, (string) json_encode([
+                    'HasBattery' => true,
+                    'Name' => 'DELL 0V9H2',
+                    'BatteryStatus' => 2,
+                    'ChargePercent' => 84,
+                    'DesignCapacity' => 50000,
+                    'FullChargedCapacity' => 45000,
+                    'CycleCount' => 120,
+                ])),
+                4 => new ProcessResult(0, (string) json_encode([
+                    'HasBattery' => false,
+                ])),
+                5 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'Name' => 'OneDrive',
+                        'Command' => 'C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe /background',
+                        'Location' => 'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run',
+                        'User' => 'CORP\\User',
+                    ],
+                ])),
+                6 => new ProcessResult(0, (string) json_encode([
+                    [
+                        'FriendlyName' => 'USB Root Hub (USB 3.0)',
+                        'Manufacturer' => '(Standard USB HUBs)',
+                        'Status' => 'OK',
+                        'InstanceId' => 'USB\\ROOT_HUB30\\4&1A2B3C',
+                    ],
+                ])),
+                7 => new ProcessResult(0, ''), // Stop-Process -Name 'notepad'
+                default => new ProcessResult(0, '[]'),
+            };
+        }
+
+        public function readFile(string $path): ?string
+        {
+            return null;
+        }
+
+        public function getEffectiveUid(): int
+        {
+            return 0;
+        }
+    };
+
+    $driver = new WindowsDriver($executor);
+
+    $services = $driver->getCriticalServices();
+    expect($services)->toHaveCount(1)
+        ->and($services[0]['name'])->toBe('Spooler')
+        ->and($services[0]['status'])->toBe('Running');
+
+    $restart = $driver->restartService('Spooler');
+    expect($restart->success)->toBeTrue()
+        ->and($restart->message)->toBe('messages.system.service_restarted_success');
+
+    $battery = $driver->getBatteryHealth();
+    expect($battery->success)->toBeTrue()
+        ->and($battery->details['charge_percent'])->toBe('84%')
+        ->and($battery->details['battery_health'])->toBe('90.0% (Wear: 10.0%)')
+        ->and($battery->details['cycle_count'])->toBe('120');
+
+    $noBattery = $driver->getBatteryHealth();
+    expect($noBattery->success)->toBeFalse()
+        ->and($noBattery->message)->toBe('messages.system.no_battery');
+
+    $startup = $driver->getStartupPrograms();
+    expect($startup)->toHaveCount(1)
+        ->and($startup[0]['name'])->toBe('OneDrive');
+
+    $usb = $driver->getUsbDevices();
+    expect($usb)->toHaveCount(1)
+        ->and($usb[0]['name'])->toBe('USB Root Hub (USB 3.0)');
+
+    $killByName = $driver->killProcessByName('notepad.exe');
+    expect($killByName->success)->toBeTrue()
+        ->and($killByName->details['process_name'])->toBe('notepad');
+
+    $validDir = sys_get_temp_dir();
+    $pathAudit = $driver->auditEnvironmentPath($validDir . ';C:\\NonExistent_Toolbox_Dir_999;' . $validDir);
+    expect($pathAudit['summary']['valid'])->toBe(1)
+        ->and($pathAudit['summary']['broken'])->toBe(1)
+        ->and($pathAudit['summary']['duplicate'])->toBe(1);
+});

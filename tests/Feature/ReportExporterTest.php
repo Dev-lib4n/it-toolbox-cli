@@ -57,9 +57,44 @@ it('generates localized Markdown (.md) and JSON (.json) diagnostic reports via R
             return new ActionResult(true, 'messages.system.process_killed_success');
         }
 
+        public function killProcessByName(string $processName): ActionResult
+        {
+            return new ActionResult(true, 'messages.system.process_killed_success');
+        }
+
         public function getCriticalLogs(int $limit = 15): ActionResult
         {
             return new ActionResult(true, 'messages.logs.no_logs', ['events' => [], 'count' => 0]);
+        }
+
+        public function getCriticalServices(): array
+        {
+            return [];
+        }
+
+        public function restartService(string $serviceName): ActionResult
+        {
+            return new ActionResult(true, 'messages.system.service_restarted_success');
+        }
+
+        public function getBatteryHealth(): ActionResult
+        {
+            return new ActionResult(false, 'messages.system.no_battery');
+        }
+
+        public function getStartupPrograms(): array
+        {
+            return [];
+        }
+
+        public function getUsbDevices(): array
+        {
+            return [];
+        }
+
+        public function auditEnvironmentPath(?string $customPathString = null): array
+        {
+            return ['variables' => [], 'path_entries' => [], 'summary' => ['valid' => 0, 'broken' => 0, 'duplicate' => 0]];
         }
 
         public function listPrinters(): array

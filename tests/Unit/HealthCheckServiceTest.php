@@ -67,6 +67,11 @@ function makeHealthDriver(
             return new ActionResult(true, 'ok');
         }
 
+        public function killProcessByName(string $processName): ActionResult
+        {
+            return new ActionResult(true, 'ok');
+        }
+
         public function getCriticalLogs(int $limit = 15): ActionResult
         {
             $events = array_fill(0, $this->criticalLogCount, [
@@ -77,6 +82,36 @@ function makeHealthDriver(
             ]);
 
             return new ActionResult(true, 'ok', ['events' => $events, 'count' => count($events)]);
+        }
+
+        public function getCriticalServices(): array
+        {
+            return [];
+        }
+
+        public function restartService(string $serviceName): ActionResult
+        {
+            return new ActionResult(true, 'ok');
+        }
+
+        public function getBatteryHealth(): ActionResult
+        {
+            return new ActionResult(false, 'messages.system.no_battery');
+        }
+
+        public function getStartupPrograms(): array
+        {
+            return [];
+        }
+
+        public function getUsbDevices(): array
+        {
+            return [];
+        }
+
+        public function auditEnvironmentPath(?string $customPathString = null): array
+        {
+            return ['variables' => [], 'path_entries' => [], 'summary' => ['valid' => 0, 'broken' => 0, 'duplicate' => 0]];
         }
 
         public function listPrinters(): array

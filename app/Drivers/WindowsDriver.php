@@ -270,6 +270,52 @@ PS,
     /**
      * {@inheritDoc}
      */
+    public function killProcessByName(string $processName): ActionResult
+    {
+        $cleanName = preg_replace('/\.exe$/i', '', trim($processName)) ?? '';
+        $cleanName = preg_replace('/[^A-Za-z0-9_.-]/', '', $cleanName) ?? '';
+
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.process_killed_failed',
+                details: ['process_name' => $processName, 'driver' => 'Windows'],
+            );
+        }
+
+        $script = sprintf("Stop-Process -Name '%s' -Force -ErrorAction Stop", $cleanName);
+        $result = $this->runPowerShell($script);
+
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.process_killed_success',
+                details: [
+                    'process_name' => $cleanName,
+                    'driver' => 'Windows',
+                ],
+            );
+        }
+
+        $errorMessage = $result->errorOutput !== '' ? $result->errorOutput : $result->output;
+        $isPermissionDenied = $this->isPermissionDeniedError($errorMessage);
+
+        return new ActionResult(
+            success: false,
+            message: $isPermissionDenied
+                ? 'messages.common.permission_denied'
+                : 'messages.system.process_killed_failed',
+            details: [
+                'process_name' => $cleanName,
+                'error' => $errorMessage !== '' ? $errorMessage : 'Stop-Process failed',
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
     public function getCriticalLogs(int $limit = 15): ActionResult
     {
         $safeLimit = max(1, $limit);
@@ -332,6 +378,232 @@ PS,
                 'driver' => 'Windows',
             ],
         );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getCriticalServices(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$names = @('Spooler','wuauserv','BITS','Dnscache','TermService','AnyDesk','TeamViewer');
+@(Get-Service -Name $names -ErrorAction SilentlyContinue | ForEach-Object {
+    [PSCustomObject]@{
+        Name = [string]$_.Name;
+        DisplayName = [string]$_.DisplayName;
+        Status = [string]$_.Status;
+        StartType = [string]$_.StartType
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $services = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['Name'])) {
+                continue;
+            }
+
+            $rawStatus = trim((string) ($item['Status'] ?? 'Stopped'));
+            $status = match ($rawStatus) {
+                '4', 'Running' => 'Running',
+                '1', 'Stopped' => 'Stopped',
+                default => $rawStatus,
+            };
+
+            $services[] = [
+                'name' => trim((string) $item['Name']),
+                'display_name' => trim((string) ($item['DisplayName'] ?? $item['Name'])),
+                'status' => $status,
+                'start_type' => trim((string) ($item['StartType'] ?? 'Automatic')),
+            ];
+        }
+
+        return $services;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function restartService(string $serviceName): ActionResult
+    {
+        $cleanName = preg_replace('/[^A-Za-z0-9_.-]/', '', trim($serviceName)) ?? '';
+        if ($cleanName === '') {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.service_restarted_failed',
+                details: ['service' => $serviceName, 'driver' => 'Windows'],
+            );
+        }
+
+        $script = sprintf("Restart-Service -Name '%s' -Force -ErrorAction Stop", $cleanName);
+        $result = $this->runPowerShell($script);
+
+        if ($result->successful) {
+            return new ActionResult(
+                success: true,
+                message: 'messages.system.service_restarted_success',
+                details: [
+                    'service' => $cleanName,
+                    'driver' => 'Windows',
+                ],
+            );
+        }
+
+        $errorMessage = $result->errorOutput !== '' ? $result->errorOutput : $result->output;
+        $isPermissionDenied = $this->isPermissionDeniedError($errorMessage);
+
+        return new ActionResult(
+            success: false,
+            message: $isPermissionDenied
+                ? 'messages.common.permission_denied'
+                : 'messages.system.service_restarted_failed',
+            details: [
+                'service' => $cleanName,
+                'error' => $errorMessage !== '' ? $errorMessage : 'Restart-Service failed',
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getBatteryHealth(): ActionResult
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+$bat = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1;
+if ($null -eq $bat) {
+    [PSCustomObject]@{ HasBattery = $false } | ConvertTo-Json -Compress;
+    exit 0;
+}
+$static = Get-CimInstance -Namespace 'root\WMI' -ClassName BatteryStaticData -ErrorAction SilentlyContinue | Select-Object -First 1;
+$full = Get-CimInstance -Namespace 'root\WMI' -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue | Select-Object -First 1;
+$cycle = Get-CimInstance -Namespace 'root\WMI' -ClassName BatteryCycleCount -ErrorAction SilentlyContinue | Select-Object -First 1;
+[PSCustomObject]@{
+    HasBattery = $true;
+    Name = [string]$bat.Name;
+    BatteryStatus = [int]$bat.BatteryStatus;
+    ChargePercent = [int]$bat.EstimatedChargeRemaining;
+    DesignCapacity = [double]($static.DesignedCapacity -as [double]);
+    FullChargedCapacity = [double]($full.FullChargedCapacity -as [double]);
+    CycleCount = [int]($cycle.CycleCount -as [int])
+} | ConvertTo-Json -Compress
+PS;
+
+        $data = $this->runPowerShellJson($script);
+
+        if ($data === [] || ($data['HasBattery'] ?? false) === false) {
+            return new ActionResult(
+                success: false,
+                message: 'messages.system.no_battery',
+                details: ['driver' => 'Windows'],
+            );
+        }
+
+        $statusInt = (int) ($data['BatteryStatus'] ?? 1);
+        $statusLabel = match ($statusInt) {
+            2, 6, 7, 8, 9 => 'Charging / AC Power',
+            1, 4, 5 => 'Discharging (On Battery)',
+            3 => 'Fully Charged',
+            default => 'Unknown',
+        };
+
+        $designCap = (float) ($data['DesignCapacity'] ?? 0.0);
+        $fullCap = (float) ($data['FullChargedCapacity'] ?? 0.0);
+        $healthPercent = ($designCap > 0.0 && $fullCap > 0.0)
+            ? min(100.0, round(($fullCap / $designCap) * 100.0, 1))
+            : 100.0;
+        $wearPercent = max(0.0, round(100.0 - $healthPercent, 1));
+
+        return new ActionResult(
+            success: true,
+            message: 'messages.system.battery_fetched_success',
+            details: [
+                'battery_status' => $statusLabel,
+                'charge_percent' => sprintf('%d%%', (int) ($data['ChargePercent'] ?? 0)),
+                'design_capacity' => $designCap > 0.0 ? sprintf('%.0f mWh', $designCap) : 'N/A',
+                'full_charge_capacity' => $fullCap > 0.0 ? sprintf('%.0f mWh', $fullCap) : 'N/A',
+                'battery_health' => sprintf('%.1f%% (Wear: %.1f%%)', $healthPercent, $wearPercent),
+                'cycle_count' => (int) ($data['CycleCount'] ?? 0) > 0 ? (string) ((int) $data['CycleCount']) : 'N/A',
+                'driver' => 'Windows',
+            ],
+        );
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getStartupPrograms(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-CimInstance -ClassName Win32_StartupCommand -ErrorAction SilentlyContinue | ForEach-Object {
+    [PSCustomObject]@{
+        Name = [string]$_.Name;
+        Command = [string]$_.Command;
+        Location = [string]$_.Location;
+        User = [string]$_.User
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $entries = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['Name'])) {
+                continue;
+            }
+
+            $entries[] = [
+                'name' => trim((string) $item['Name']),
+                'command' => $this->truncateLogMessage((string) ($item['Command'] ?? '-'), 65),
+                'location' => trim((string) ($item['Location'] ?? 'Registry')),
+                'user' => trim((string) ($item['User'] ?? 'System')),
+            ];
+        }
+
+        return $entries;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function getUsbDevices(): array
+    {
+        $script = <<<'PS'
+$ErrorActionPreference = 'SilentlyContinue';
+@(Get-PnpDevice -Class USB,HIDClass,Printer,Image -PresentOnly -ErrorAction SilentlyContinue | Select-Object -First 40 | ForEach-Object {
+    [PSCustomObject]@{
+        FriendlyName = [string]$_.FriendlyName;
+        Manufacturer = [string]$_.Manufacturer;
+        Status = [string]$_.Status;
+        InstanceId = [string]$_.InstanceId
+    }
+}) | ConvertTo-Json -Compress
+PS;
+
+        $items = $this->normalizeJsonList($this->runPowerShellJson($script));
+
+        $devices = [];
+        foreach ($items as $item) {
+            if (! is_array($item) || empty($item['FriendlyName'])) {
+                continue;
+            }
+
+            $devices[] = [
+                'name' => trim((string) $item['FriendlyName']),
+                'manufacturer' => trim((string) ($item['Manufacturer'] ?? '-')) ?: '-',
+                'status' => trim((string) ($item['Status'] ?? 'OK')) ?: 'OK',
+                'device_id' => $this->truncateLogMessage((string) ($item['InstanceId'] ?? '-'), 55),
+            ];
+        }
+
+        return $devices;
     }
 
     /**
