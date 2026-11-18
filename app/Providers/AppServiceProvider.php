@@ -7,11 +7,14 @@ namespace App\Providers;
 use App\Contracts\ProcessExecutorInterface;
 use App\Contracts\SystemDriverInterface;
 use App\Factories\SystemDriverFactory;
+use App\Services\SelfUpdateService;
 use App\Services\SymfonyProcessExecutor;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Translation\FileLoader;
 use Illuminate\Translation\Translator;
+use Phar;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,7 +23,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        if (Phar::running(false) !== '') {
+            try {
+                app(SelfUpdateService::class)->cleanupOldBinaries();
+            } catch (Throwable) {
+                // Never block application startup if stale backup cleanup fails.
+            }
+        }
     }
 
     /**

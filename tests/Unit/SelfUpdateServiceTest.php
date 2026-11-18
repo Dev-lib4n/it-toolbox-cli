@@ -80,3 +80,43 @@ it('downloads and atomically replaces the executable (with .old backup on Window
         @rmdir($tempDir);
     }
 });
+
+it('cleans up stale .old backup binaries without deleting the active executable or unrelated files', function (): void {
+    $tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'it_toolbox_cleanup_' . uniqid();
+    mkdir($tempDir, 0777, true);
+
+    $activeExe = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox-windows-x64.exe';
+    $oldExe1 = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox-windows-x64.exe.old';
+    $oldExe2 = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox-1.9.0.exe.old';
+    $oldPhar = $tempDir . DIRECTORY_SEPARATOR . 'it-toolbox.old';
+    $unrelatedOld = $tempDir . DIRECTORY_SEPARATOR . 'other-utility.exe.old';
+    $notesFile = $tempDir . DIRECTORY_SEPARATOR . 'notes.txt';
+
+    file_put_contents($activeExe, 'ACTIVE_BINARY');
+    file_put_contents($oldExe1, 'OLD_BACKUP_1');
+    file_put_contents($oldExe2, 'OLD_BACKUP_2');
+    file_put_contents($oldPhar, 'OLD_BACKUP_3');
+    file_put_contents($unrelatedOld, 'KEEP_UNRELATED');
+    file_put_contents($notesFile, 'KEEP_NOTES');
+
+    $service = new SelfUpdateService(runningBinaryPath: $activeExe);
+
+    try {
+        expect($service->cleanupOldBinaries())->toBe(3)
+            ->and(file_exists($activeExe))->toBeTrue()
+            ->and(file_exists($oldExe1))->toBeFalse()
+            ->and(file_exists($oldExe2))->toBeFalse()
+            ->and(file_exists($oldPhar))->toBeFalse()
+            ->and(file_exists($unrelatedOld))->toBeTrue()
+            ->and(file_exists($notesFile))->toBeTrue()
+            ->and($service->cleanupOldBinaries(''))->toBe(0);
+    } finally {
+        @unlink($activeExe);
+        @unlink($oldExe1);
+        @unlink($oldExe2);
+        @unlink($oldPhar);
+        @unlink($unrelatedOld);
+        @unlink($notesFile);
+        @rmdir($tempDir);
+    }
+});

@@ -254,6 +254,56 @@ class SelfUpdateService
     }
 
     /**
+     * Remove stale `.old` backup binaries in the same directory as the active executable.
+     */
+    public function cleanupOldBinaries(?string $binaryPath = null): int
+    {
+        $path = $binaryPath ?? $this->getRunningBinaryPath();
+        if ($path === '') {
+            return 0;
+        }
+
+        $directory = dirname($path);
+        if (! is_dir($directory)) {
+            return 0;
+        }
+
+        $entries = @scandir($directory);
+        if (! is_array($entries)) {
+            return 0;
+        }
+
+        $exactOldName = strtolower(basename($path) . '.old');
+        $removed = 0;
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $lowerEntry = strtolower($entry);
+            if (! str_ends_with($lowerEntry, '.old')) {
+                continue;
+            }
+
+            if ($lowerEntry !== $exactOldName && ! str_starts_with($lowerEntry, 'it-toolbox')) {
+                continue;
+            }
+
+            $candidatePath = $directory . DIRECTORY_SEPARATOR . $entry;
+            if ($candidatePath === $path || ! is_file($candidatePath)) {
+                continue;
+            }
+
+            if (@unlink($candidatePath)) {
+                $removed++;
+            }
+        }
+
+        return $removed;
+    }
+
+    /**
      * Normalize a version tag (e.g. "v1.2.0" -> "1.2.0").
      */
     public function normalizeVersion(string $version): string
@@ -312,11 +362,14 @@ class SelfUpdateService
 
     /**
      * Replace the current executable with the downloaded temporary file.
-     * On Windows, renames the locked running binary to `.old` before moving the new binary into place.
+     * On Windows, renames the locked running binary to `.old` before moving the new binary into place
+     * and schedules an asynchronous background cleanup after the current process exits.
      */
     protected function replaceBinaryAtomically(string $tempPath, string $targetPath, string $osFamily): bool
     {
         if ($osFamily === 'Windows' || str_ends_with(strtolower($targetPath), '.exe')) {
+            $this->cleanupOldBinaries($targetPath);
+
             $oldBackupPath = $targetPath . '.old';
             if (is_file($oldBackupPath)) {
                 @unlink($oldBackupPath);
@@ -335,10 +388,32 @@ class SelfUpdateService
                 return false;
             }
 
+            $this->scheduleWindowsBackupDeletion($oldBackupPath, $osFamily);
+
             return true;
         }
 
         return @rename($tempPath, $targetPath);
+    }
+
+    /**
+     * Spawn a non-blocking background command on Windows to delete the `.old` backup once this process exits.
+     */
+    protected function scheduleWindowsBackupDeletion(string $oldBackupPath, string $osFamily): void
+    {
+        if ($osFamily !== 'Windows' || PHP_OS_FAMILY !== 'Windows') {
+            return;
+        }
+
+        if (! function_exists('popen') || ! function_exists('pclose')) {
+            return;
+        }
+
+        $command = 'start /B cmd /c "ping 127.0.0.1 -n 3 > nul & del /f /q ' . escapeshellarg($oldBackupPath) . '"';
+        $handle = @popen($command, 'r');
+        if (is_resource($handle)) {
+            @pclose($handle);
+        }
     }
 
     /**
